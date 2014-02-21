@@ -5,8 +5,7 @@
 #include "qtservice.h"
 #include "safedaemon.h"
 
-class SafeService : public QtService<QCoreApplication>
-{
+class SafeService : public QtService<QCoreApplication> {
 public:
     SafeService(int argc, char **argv);
 

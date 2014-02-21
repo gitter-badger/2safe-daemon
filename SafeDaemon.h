@@ -2,26 +2,39 @@
 #define SAFEDAEMON_H
 
 #include <QObject>
-#include <QFileSystemWatcher>
-#include <QFile>
-#include <QIODevice>
-#include <QTextStream>
 #include <QLocalServer>
+#include <QSettings>
+#include <QLocalSocket>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QJsonArray>
+#include <QJsonValue>
+#include <QJsonParseError>
+#include <QTextStream>
+#include <lib2safe/safeapi.h>
 #include "qtservice.h"
+#include "safefilesystem.h"
 
-class SafeDaemon : public QObject
-{
+class SafeDaemon : public QLocalServer {
     Q_OBJECT
 
 public:
-    SafeDaemon();
+    SafeDaemon(const QString &name, QObject *parent);
+    ~SafeDaemon();
 
 private:
-    QFileSystemWatcher *watcher;
-    QString logFilename;
+    SafeFileSystem *filesystem;
+    QSettings *settings;
+    SafeApi *api;
+    void authUser();
+    void incomingConnection(quintptr descriptor);
+    void setSettings(const QJsonObject &requestArgs);
+    QJsonObject getSettings(const QJsonArray &requestFields);
 
-public slots:
-    void directoryChanged(const QString &path);
+private slots:
+    void readClient();
+    void discardClient();
+    void authUserComplete();
 };
 
 #endif // SAFEDAEMON_H

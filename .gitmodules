@@ -1,3 +1,6 @@
 [submodule "qt-solutions"]
 	path = qt-solutions
 	url = git://gitorious.org/qt-solutions/qt-solutions.git
+[submodule "lib2safe"]
+	path = lib2safe
+	url = git@github.com:md5crew/lib2safe.git

@@ -1,16 +1,22 @@
 #include "safeservice.h"
 
-SafeService::SafeService(int argc, char **argv) : QtService<QCoreApplication>(argc, argv, "2 Safe Daemon")
-{
-    setServiceDescription("2 Safe Daemon");
+SafeService::SafeService(int argc, char **argv) : QtService<QCoreApplication>(argc, argv, "2 Safe Daemon") {
+    setServiceDescription("2Safe Daemon");
 }
 
-void SafeService::start()
-{
-    this->daemon = new SafeDaemon(); // TODO should we delete it somewhere?
+void SafeService::start() {
+    QCoreApplication *app = application();
+
+    QString socketPath = QDir::cleanPath(QDir::homePath() + "/.2safe/control.sock");
+    this->daemon = new SafeDaemon(socketPath, app);
+
+    if (this->daemon->isListening()) {
+        qDebug() << "Socket path: " << this->daemon->fullServerName();
+    } else {
+        qDebug() << "Failed to start daemon. Now go fuck yourself.";
+    }
 }
 
-void SafeService::stop()
-{
+void SafeService::stop() {
 
 }

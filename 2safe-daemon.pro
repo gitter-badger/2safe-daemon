@@ -1,4 +1,5 @@
 QT       += core
+QT       += sql
 QT       -= gui
 
 TARGET = 2safe-daemon
@@ -10,10 +11,13 @@ TEMPLATE = app
 
 SOURCES += main.cpp \
     safedaemon.cpp \
-    safeservice.cpp
+    safeservice.cpp \
+    safefilesystem.cpp
 
 include(qt-solutions/qtservice/src/qtservice.pri)
+include(lib2safe/safe.pri)
 
 HEADERS += \
     safedaemon.h \
-    safeservice.h
+    safeservice.h \
+    safefilesystem.h
