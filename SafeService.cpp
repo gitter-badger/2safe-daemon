@@ -2,6 +2,8 @@
 
 SafeService::SafeService(int argc, char **argv) : QtService<QCoreApplication>(argc, argv, "2 Safe Daemon") {
     setServiceDescription("2Safe Daemon");
+    //QCoreApplication::setOrganizationName("2safe");
+    //QCoreApplication::setApplicationName("2safe");
 }
 
 void SafeService::start() {

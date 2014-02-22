@@ -2,7 +2,8 @@
 
 SafeDaemon::SafeDaemon(const QString &name, QObject *parent = 0) : QLocalServer(parent) {
     this->listen(name);
-    this->settings = new QSettings("2safe", "2safe", this);
+    this->settings = new QSettings(ORG_NAME, APPLICATION_NAME, this);
+    this->api = new SafeApi(API_HOST);
     //this->authUser();
     this->authUserComplete();
 }
@@ -12,15 +13,17 @@ SafeDaemon::~SafeDaemon() {
 }
 
 void SafeDaemon::authUser() {
-    if (this->settings->contains("login") && this->settings->contains("password")) {
-        this->api = new SafeApi("https://api.2safe.com");
-        connect(this->api, &SafeApi::authUserComplete, this, &SafeDaemon::authUserComplete);
-        this->api->authUser(this->settings->value("login").toString(), this->settings->value("password").toString());
-    }
+    QString login = this->settings->value("login", "").toString();
+    QString password = this->settings->value("password", "").toString();
+
+    if(login.length() < 1 || password.length() < 1) return;
+
+    this->connect(this->api, &SafeApi::authUserComplete, &SafeDaemon::authUserComplete);
+    this->api->authUser(login, password);
 }
 
 void SafeDaemon::authUserComplete() {
-    this->filesystem = new SafeFileSystem(QDir::cleanPath(QDir::homePath() + "/2safe"), "2safe.db", true, this);
+    this->filesystem = new SafeFileSystem(getFilesystemPath(), STATE_DATABASE, true, this);
 }
 
 void SafeDaemon::incomingConnection(quintptr descriptor) {
@@ -37,7 +40,7 @@ void SafeDaemon::readClient() {
         QJsonDocument requestData = QJsonDocument::fromJson(socket->readLine(), &error);
 
         if (error.error == QJsonParseError::NoError && requestData.isObject()) {
-            QJsonObject requestJson = requestData.object();  
+            QJsonObject requestJson = requestData.object();
             QString requestType = requestJson["type"].toString();
 
             if (requestType == "set_settings") {
@@ -78,4 +81,10 @@ QJsonObject SafeDaemon::getSettings(const QJsonArray &requestFields) {
     result.insert("type", QJsonValue(QString("settings")));
     result.insert("values", values);
     return result;
+}
+
+QString SafeDaemon::getFilesystemPath()
+{
+    QString root = this->settings->value("root_name", DEFAULT_ROOT_NAME).toString();
+    return QDir::cleanPath(QDir::homePath() + QDir::separator() + root);
 }

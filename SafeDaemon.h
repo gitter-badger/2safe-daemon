@@ -11,9 +11,11 @@
 #include <QJsonValue>
 #include <QJsonParseError>
 #include <QTextStream>
-#include <lib2safe/safeapi.h>
 #include "qtservice.h"
+#include <lib2safe/safeapi.h>
+//----
 #include "safefilesystem.h"
+#include "safecommon.h"
 
 class SafeDaemon : public QLocalServer {
     Q_OBJECT
@@ -30,6 +32,7 @@ private:
     void incomingConnection(quintptr descriptor);
     void setSettings(const QJsonObject &requestArgs);
     QJsonObject getSettings(const QJsonArray &requestFields);
+    QString getFilesystemPath();
 
 private slots:
     void readClient();

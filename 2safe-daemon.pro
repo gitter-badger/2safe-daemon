@@ -20,4 +20,5 @@ include(lib2safe/safe.pri)
 HEADERS += \
     safedaemon.h \
     safeservice.h \
-    safefilesystem.h
+    safefilesystem.h \
+    safecommon.h
