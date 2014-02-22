@@ -4,6 +4,7 @@ SafeDaemon::SafeDaemon(QObject *parent) : QObject(parent) {
     this->settings = new QSettings(ORG_NAME, APP_NAME, this);
     this->api = new SafeApi(API_HOST);
     this->server = new QLocalServer(this);
+    connect(server, &QLocalServer::newConnection, this, &SafeDaemon::handleClientConnection);
     bindServer(this->server,
                QDir::homePath() +
                QDir::separator() + SAFE_DIR +
