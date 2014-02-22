@@ -1,7 +1,6 @@
 #include "safefilesystem.h"
 
-SafeFileSystem::SafeFileSystem(const QString &path, const QString &databaseName, bool debug = false, QObject *parent = 0) : QObject(parent) {
-    this->debug = debug;
+SafeFileSystem::SafeFileSystem(const QString &path, const QString &databaseName, QObject *parent = 0) : QObject(parent) {
     this->directory = path;
     this->initDatabase(databaseName);
     this->createDatabase();
@@ -19,20 +18,20 @@ void SafeFileSystem::initDatabase(const QString &databaseName) {
     QString databaseDirectory = QStandardPaths::writableLocation(QStandardPaths::DataLocation);
 
     if (databaseDirectory.isEmpty()) {
-        this->log("Can not find database location");
+        qDebug() << "Can not find database location";
     } else {
         if (!QDir(databaseDirectory).exists()) {
             QDir().mkdir(databaseDirectory);
         }
 
         QString databasePath = QDir(databaseDirectory).filePath(databaseName);
-        this->log("Using database path: " + databasePath);
+        qDebug() << "Using database path:" << databasePath;
 
         this->database = QSqlDatabase::addDatabase("QSQLITE");
         this->database.setDatabaseName(databasePath);
 
         if (!this->database.open()) {
-            this->log("Can not open database");
+            qDebug() << "Can not open database";
         }
     }
 }
@@ -76,7 +75,7 @@ void SafeFileSystem::reindexDirectory(const QString &path) {
         selectQuery.bindValue(":hash", hash);
 
         if (!selectQuery.exec()) {
-            this->log("Can not run database query");
+            qDebug() << "Can not run database query";
         } else {
             QSqlRecord record = selectQuery.record();
 
@@ -85,11 +84,11 @@ void SafeFileSystem::reindexDirectory(const QString &path) {
 
                 if (updatedAtFs.toTime_t() != updatedAtDb) {
                     this->updateFileInfo(iterator.filePath(), hash, updatedAtFs.toTime_t());
-                    this->log("File modified: (" + QString::number(updatedAtDb) + ", " + QString::number(updatedAtFs.toTime_t()) + ")" + iterator.filePath());
+                    qDebug() << "File modified: (" << QString::number(updatedAtDb) << "," << QString::number(updatedAtFs.toTime_t()) << ")" << iterator.filePath();
                 }
             } else {
                 this->saveFileInfo(iterator.filePath(), hash, updatedAtFs.toTime_t());
-                this->log("File added: " + iterator.filePath());
+                qDebug() << "File added:" << iterator.filePath();
             }
         }
     }
@@ -103,7 +102,7 @@ void SafeFileSystem::saveFileInfo(const QString &path, const QString &hash, cons
     query.bindValue(":updated_at", updatedAt);
 
     if (!query.exec()) {
-        this->log("Can not run database query: " + query.lastError().text());
+        qDebug() << "Can not run database query:" << query.lastError().text();
     }
 }
 
@@ -115,7 +114,7 @@ void SafeFileSystem::updateFileInfo(const QString &path, const QString &hash, co
     query.bindValue(":updated_at", updatedAt);
 
     if (!query.exec()) {
-        this->log("Can not run database query: " + query.lastError().text());
+        qDebug() << "Can not run database query:" << query.lastError().text();
     }
 }
 
@@ -124,7 +123,7 @@ void SafeFileSystem::createDatabase() {
     query.prepare("CREATE TABLE IF NOT EXISTS files (hash VARCHAR(32) PRIMARY KEY, path TEXT, updated_at INTEGER)");
 
     if (!query.exec()) {
-        this->log("Can not run database query");
+        qDebug() << "Can not run database query";
     }
 }
 
@@ -133,19 +132,4 @@ void SafeFileSystem::createDatabase() {
  */
 void SafeFileSystem::directoryChanged(const QString &path) {
     this->reindexDirectory(path);
-}
-
-/*
- * Dummy log method
- */
-void SafeFileSystem::log(const QString &str) {
-    if (this->debug) {
-        QFile logFile("/Users/awolf/2safe.log");
-
-        if (logFile.open(QIODevice::Append)) {
-            QTextStream logStream(&logFile);
-            logStream << str << "\n";
-            logFile.close();
-        }
-    }
 }

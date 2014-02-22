@@ -18,12 +18,13 @@
 #include <QSqlRecord>
 #include <QCryptographicHash>
 #include <QSqlError>
+#include <QDebug>
 
 class SafeFileSystem : public QObject {
     Q_OBJECT
 
 public:
-    SafeFileSystem(const QString &path, const QString &dbName, bool debug, QObject *parent);
+    SafeFileSystem(const QString &path, const QString &dbName, QObject *parent);
     ~SafeFileSystem();
 
 signals:
@@ -42,7 +43,6 @@ private:
     void createDatabase();
     void saveFileInfo(const QString &path, const QString &hash, const uint &updatedAt);
     void updateFileInfo(const QString &path, const QString &hash, const uint &updatedAt);
-    void log(const QString &str);
 
 public slots:
     void directoryChanged(const QString &path);

@@ -4,10 +4,10 @@ SafeDaemon::SafeDaemon(QObject *parent) : QObject(parent) {
     this->settings = new QSettings(ORG_NAME, APP_NAME, this);
     this->api = new SafeApi(API_HOST);
     this->server = new QLocalServer(this);
-    bindServer(this->server,
-               QDir::homePath() +
-               QDir::separator() + SAFE_DIR +
-               QDir::separator() + SOCKET_FILE);
+    this->bindServer(this->server,
+                     QDir::homePath() +
+                     QDir::separator() + SAFE_DIR +
+                     QDir::separator() + SOCKET_FILE);
 
     //this->authUser();
     //this->authUserComplete();
@@ -21,14 +21,16 @@ void SafeDaemon::authUser() {
     QString login = this->settings->value("login", "").toString();
     QString password = this->settings->value("password", "").toString();
 
-    if(login.length() < 1 || password.length() < 1) return;
+    if (login.length() < 1 || password.length() < 1) {
+        return;
+    }
 
     connect(this->api, &SafeApi::authUserComplete, this, &SafeDaemon::authUserComplete);
     this->api->authUser(login, password);
 }
 
 void SafeDaemon::authUserComplete() {
-    this->filesystem = new SafeFileSystem(getFilesystemPath(), STATE_DATABASE, true, this);
+    this->filesystem = new SafeFileSystem(getFilesystemPath(), STATE_DATABASE, this);
 }
 
 QString SafeDaemon::getFilesystemPath()
@@ -43,7 +45,7 @@ QJsonObject SafeDaemon::formSettingsReply(const QJsonArray &requestFields) {
     result.insert("type", QJsonValue(QString("settings")));
     foreach (auto field, requestFields) {
         QString value = this->settings->value(field.toString(), "").toString();
-        if(value.length() > 0) {
+        if (value.length() > 0) {
             values.insert(field.toString(), value);
         }
     }
@@ -54,11 +56,11 @@ QJsonObject SafeDaemon::formSettingsReply(const QJsonArray &requestFields) {
 void SafeDaemon::bindServer(QLocalServer *server, QString path)
 {
     QFile socket_file(path);
-    if(!server->listen(path)) {
+    if (!server->listen(path)) {
         /* try to remove old socket file */
-        if(socket_file.exists() && socket_file.remove()) {
+        if (socket_file.exists() && socket_file.remove()) {
             /* retry bind */
-            if(!server->listen(path)) {
+            if (!server->listen(path)) {
                 qWarning() << "Unable to bind socket to" << path;
             }
         } else {
@@ -75,7 +77,7 @@ void SafeDaemon::handleClientConnection()
     }
 
     QObject::connect(socket, &QLocalSocket::disconnected, &QLocalSocket::deleteLater);
-    if(!socket->isValid() || socket->bytesAvailable() < 1) {
+    if (!socket->isValid() || socket->bytesAvailable() < 1) {
         return;
     }
 
@@ -89,7 +91,7 @@ void SafeDaemon::handleClientConnection()
     /* JSON PARSE */
     QJsonParseError jsonError;
     QJsonDocument jsonMessage = QJsonDocument::fromJson(data.toLatin1(), &jsonError);
-    if(jsonError.error) {
+    if (jsonError.error) {
         qWarning() << "JSON error:" << jsonError.errorString();
         return;
     } else if (!jsonMessage.isObject()) {
@@ -101,7 +103,7 @@ void SafeDaemon::handleClientConnection()
     QJsonObject message = jsonMessage.object();
     QString type = message["type"].toString();
 
-    if(type == GET_SETTINGS_TYPE) {
+    if (type == GET_SETTINGS_TYPE) {
         QJsonObject response = formSettingsReply(message["fields"].toArray());
         stream <<  QJsonDocument(response).toJson();
         stream.flush();
