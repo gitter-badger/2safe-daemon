@@ -11,32 +11,39 @@
 #include <QJsonValue>
 #include <QJsonParseError>
 #include <QTextStream>
-#include "qtservice.h"
 #include <lib2safe/safeapi.h>
 //----
 #include "safefilesystem.h"
 #include "safecommon.h"
 
-class SafeDaemon : public QLocalServer {
+class SafeDaemon : public QObject {
     Q_OBJECT
 
 public:
-    SafeDaemon(const QString &name, QObject *parent);
+    SafeDaemon(QObject *parent = 0);
+    bool isListening() { return server->isListening(); }
+    QString socketPath() { return server->fullServerName(); }
     ~SafeDaemon();
 
 private:
-    SafeFileSystem *filesystem;
-    QSettings *settings;
-    SafeApi *api;
+    SafeApi *api; // api facade
+    QLocalServer *server; // socket listener
+    QSettings *settings; // settings db
+    SafeFileSystem *filesystem; // filesystem monitor
+
+    // helpers
     void authUser();
-    void incomingConnection(quintptr descriptor);
-    void setSettings(const QJsonObject &requestArgs);
-    QJsonObject getSettings(const QJsonArray &requestFields);
+
+    // message handlers
+    QJsonObject formSettingsReply(const QJsonArray &requestFields);
+
+    // utilities
+    void bindServer(QLocalServer *server, QString path);
     QString getFilesystemPath();
 
 private slots:
-    void readClient();
-    void discardClient();
+    void handleClientConnection();
+    //
     void authUserComplete();
 };
 

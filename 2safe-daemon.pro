@@ -11,14 +11,11 @@ TEMPLATE = app
 
 SOURCES += main.cpp \
     safedaemon.cpp \
-    safeservice.cpp \
     safefilesystem.cpp
 
-include(qt-solutions/qtservice/src/qtservice.pri)
 include(lib2safe/safe.pri)
 
 HEADERS += \
     safedaemon.h \
-    safeservice.h \
     safefilesystem.h \
     safecommon.h
