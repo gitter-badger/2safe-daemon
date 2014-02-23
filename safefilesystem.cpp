@@ -6,25 +6,34 @@ SafeFileSystem::SafeFileSystem(const QString &path, const QString &databaseName,
 }
 
 SafeFileSystem::~SafeFileSystem() {
+    QDirIterator directoryIterator(this->directory, QDir::Dirs | QDir::NoDotAndDotDot, QDirIterator::Subdirectories);
+    QStringList directories;
+
+    directories.append(this->directory);
+    while (directoryIterator.hasNext()) {
+        directories.append(directoryIterator.next());
+    }
+
+    this->watcher.removePaths(directories);
 }
 
 void SafeFileSystem::startWatching() {
-    this->initDatabase(this->databaseName);
+    this->initDatabase();
     this->createDatabase();
-    this->initWatcher(this->directory);
+    this->initWatcher();
 }
 
-void SafeFileSystem::initDatabase(const QString &databaseName) {
+void SafeFileSystem::initDatabase() {
     QString databaseDirectory = QStandardPaths::writableLocation(QStandardPaths::DataLocation);
 
     if (databaseDirectory.isEmpty()) {
         qDebug() << "Can not find database location";
     } else {
         if (!QDir(databaseDirectory).exists()) {
-            QDir().mkdir(databaseDirectory);
+            QDir().mkpath(databaseDirectory);
         }
 
-        QString databasePath = QDir(databaseDirectory).filePath(databaseName);
+        QString databasePath = QDir(databaseDirectory).filePath(this->databaseName);
         qDebug() << "Using database path:" << databasePath;
 
         this->database = QSqlDatabase::addDatabase("QSQLITE");
@@ -36,8 +45,8 @@ void SafeFileSystem::initDatabase(const QString &databaseName) {
     }
 }
 
-void SafeFileSystem::initWatcher(const QString &path) {
-    QDirIterator directoryIterator(path, QDir::Dirs | QDir::NoDotAndDotDot, QDirIterator::Subdirectories);
+void SafeFileSystem::initWatcher() {
+    QDirIterator directoryIterator(this->directory, QDir::Dirs | QDir::NoDotAndDotDot, QDirIterator::Subdirectories);
     QStringList directories;
 
     directories.append(this->directory);

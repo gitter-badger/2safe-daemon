@@ -39,10 +39,10 @@ private:
     QFileSystemWatcher watcher;
     QSqlDatabase database;
 
-    void initDatabase(const QString &databaseName);
-    void initWatcher(const QString &path);
-    void reindexDirectory(const QString &path);
+    void initWatcher();
+    void initDatabase();
     void createDatabase();
+    void reindexDirectory(const QString &path);
     void saveFileInfo(const QString &path, const QString &hash, const uint &updatedAt);
     void updateFileInfo(const QString &path, const QString &hash, const uint &updatedAt);
 
