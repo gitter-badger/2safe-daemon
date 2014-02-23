@@ -135,3 +135,15 @@ void SafeFileSystem::createDatabase() {
 void SafeFileSystem::directoryChanged(const QString &path) {
     this->reindexDirectory(path);
 }
+
+void SafeFileSystem::newFileUploaded(const QFileInfo &info, const QString &hash, const uint &updatedAt) {
+    qDebug() << "New file info saved";
+
+    this->saveFileInfo(info.filePath(), hash, updatedAt);
+}
+
+void SafeFileSystem::fileUploaded(const QFileInfo &info, const QString &hash, const uint &updatedAt) {
+    qDebug() << "File info updated";
+
+    this->updateFileInfo(info.filePath(), hash, updatedAt);
+}

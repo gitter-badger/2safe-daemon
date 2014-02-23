@@ -44,6 +44,8 @@ void SafeDaemon::authUserComplete() {
     this->filesystem = new SafeFileSystem(getFilesystemPath(), STATE_DATABASE, this);
     connect(this->filesystem, &SafeFileSystem::fileAdded, this, &SafeDaemon::fileAdded);
     connect(this->filesystem, &SafeFileSystem::fileChanged, this, &SafeDaemon::fileChanged);
+    connect(this, &SafeDaemon::newFileUploaded, this->filesystem, &SafeFileSystem::newFileUploaded);
+    connect(this, &SafeDaemon::fileUploaded, this->filesystem, &SafeFileSystem::fileUploaded);
     this->filesystem->startWatching();
 }
 
@@ -135,11 +137,27 @@ void SafeDaemon::handleClientConnection()
 }
 
 void SafeDaemon::fileAdded(const QFileInfo &info, const QString &hash, const uint &updatedAt) {
-    qDebug() << "Uploading file" << info.filePath();
+    qDebug() << "Uploading new file" << info.filePath();
 
-    uint id = this->api->pushFile("227930033757", info.filePath(), info.fileName());
+    uint savedId = this->api->pushFile("227930033757", info.filePath(), info.fileName());
+    connect(this->api, &SafeApi::pushFileComplete, [this, info, hash, updatedAt, savedId](ulong id, SafeFile file_info) {
+        if (savedId == id) {
+            qDebug() << "New file uploaded";
+
+            emit this->newFileUploaded(info, hash, updatedAt);
+        }
+    });
 }
 
 void SafeDaemon::fileChanged(const QFileInfo &info, const QString &hash, const uint &updatedAt) {
+    qDebug() << "Uploading file" << info.filePath();
 
+    uint savedId = this->api->pushFile("227930033757", info.filePath(), info.fileName());
+    connect(this->api, &SafeApi::pushFileComplete, [this, info, hash, updatedAt, savedId](ulong id, SafeFile file_info) {
+        if (savedId == id) {
+            qDebug() << "File uploaded";
+
+            emit this->fileUploaded(info, hash, updatedAt);
+        }
+    });
 }
