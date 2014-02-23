@@ -8,13 +8,10 @@
 #define SAFE_DIR ".2safe"
 #define SOCKET_FILE "control.sock"
 
-
-// IPC message types
 #define SET_SETTINGS_TYPE "set_settings"
 #define GET_SETTINGS_TYPE "get_settings"
 #define REPLY_SETTINGS_TYPE "settings"
 #define ACTION_TYPE "action"
 #define API_CALL "api_call"
-
 
 #endif // SAFECOMMON_H

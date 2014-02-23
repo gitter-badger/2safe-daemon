@@ -24,19 +24,21 @@ class SafeFileSystem : public QObject {
     Q_OBJECT
 
 public:
-    SafeFileSystem(const QString &path, const QString &dbName, QObject *parent);
+    SafeFileSystem(const QString &path, const QString &databaseName, QObject *parent);
     ~SafeFileSystem();
+    void startWatching();
 
 signals:
     void indexingStarted();
     void indexingFinished();
-    void fileChanged(const QString &path);
+    void fileAdded(const QFileInfo &info, const QString &path, const uint &updatedAt);
+    void fileChanged(const QFileInfo &info, const QString &path, const uint &updatedAt);
 
 private:
-    bool debug;
-    QString directory;
+    QString directory, databaseName;
     QFileSystemWatcher watcher;
     QSqlDatabase database;
+
     void initDatabase(const QString &databaseName);
     void initWatcher(const QString &path);
     void reindexDirectory(const QString &path);

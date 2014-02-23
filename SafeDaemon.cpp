@@ -6,17 +6,24 @@ SafeDaemon::SafeDaemon(QObject *parent) : QObject(parent) {
     this->server = new QLocalServer(this);
 
     connect(server, &QLocalServer::newConnection, this, &SafeDaemon::handleClientConnection);
-    bindServer(this->server,
-               QDir::homePath() +
-               QDir::separator() + SAFE_DIR +
-               QDir::separator() + SOCKET_FILE);
+    this->bindServer(this->server,
+                     QDir::homePath() +
+                     QDir::separator() + SAFE_DIR +
+                     QDir::separator() + SOCKET_FILE);
 
-    //this->authUser();
-    //this->authUserComplete();
+    this->authUser();
 }
 
 SafeDaemon::~SafeDaemon() {
     delete this->api;
+}
+
+bool SafeDaemon::isListening() {
+    return this->server->isListening();
+}
+
+QString SafeDaemon::socketPath() {
+    return this->server->fullServerName();
 }
 
 void SafeDaemon::authUser() {
@@ -32,7 +39,12 @@ void SafeDaemon::authUser() {
 }
 
 void SafeDaemon::authUserComplete() {
+    qDebug() << "Authorization completed";
+
     this->filesystem = new SafeFileSystem(getFilesystemPath(), STATE_DATABASE, this);
+    connect(this->filesystem, &SafeFileSystem::fileAdded, this, &SafeDaemon::fileAdded);
+    connect(this->filesystem, &SafeFileSystem::fileChanged, this, &SafeDaemon::fileChanged);
+    this->filesystem->startWatching();
 }
 
 QString SafeDaemon::getFilesystemPath()
@@ -89,8 +101,7 @@ void SafeDaemon::handleClientConnection()
     QString data(stream.readAll());
     qDebug() << "Data read:" << data;
 
-
-    /* JSON PARSE */
+    /* JSON parsing */
     QJsonParseError jsonError;
     QJsonDocument jsonMessage = QJsonDocument::fromJson(data.toLatin1(), &jsonError);
     if (jsonError.error) {
@@ -101,7 +112,7 @@ void SafeDaemon::handleClientConnection()
         return;
     }
 
-    /* LOGIC */
+    /* Login */
     QJsonObject message = jsonMessage.object();
     QString type = message["type"].toString();
 
@@ -121,4 +132,14 @@ void SafeDaemon::handleClientConnection()
     }
 
     socket->close();
+}
+
+void SafeDaemon::fileAdded(const QFileInfo &info, const QString &hash, const uint &updatedAt) {
+    qDebug() << "Uploading file" << info.filePath();
+
+    uint id = this->api->pushFile("227930033757", info.filePath(), info.fileName());
+}
+
+void SafeDaemon::fileChanged(const QFileInfo &info, const QString &hash, const uint &updatedAt) {
+
 }

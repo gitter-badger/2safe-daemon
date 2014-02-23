@@ -2,18 +2,18 @@
 
 SafeFileSystem::SafeFileSystem(const QString &path, const QString &databaseName, QObject *parent = 0) : QObject(parent) {
     this->directory = path;
-    this->initDatabase(databaseName);
-    this->createDatabase();
-    this->initWatcher(path);
+    this->databaseName = databaseName;
 }
 
 SafeFileSystem::~SafeFileSystem() {
-
 }
 
-/*
- * Establish a connection to SQLite database
- */
+void SafeFileSystem::startWatching() {
+    this->initDatabase(this->databaseName);
+    this->createDatabase();
+    this->initWatcher(this->directory);
+}
+
 void SafeFileSystem::initDatabase(const QString &databaseName) {
     QString databaseDirectory = QStandardPaths::writableLocation(QStandardPaths::DataLocation);
 
@@ -36,9 +36,6 @@ void SafeFileSystem::initDatabase(const QString &databaseName) {
     }
 }
 
-/*
- * Recursively scan 2Safe root directory and add all subdirectories to watchlist
- */
 void SafeFileSystem::initWatcher(const QString &path) {
     QDirIterator directoryIterator(path, QDir::Dirs | QDir::NoDotAndDotDot, QDirIterator::Subdirectories);
     QStringList directories;
@@ -57,9 +54,6 @@ void SafeFileSystem::initWatcher(const QString &path) {
     }
 }
 
-/*
- * Recursively iterate a given directory and find the files that have been modified
- */
 void SafeFileSystem::reindexDirectory(const QString &path) {
     QDirIterator iterator(path, QDir::Files);
 
@@ -83,12 +77,14 @@ void SafeFileSystem::reindexDirectory(const QString &path) {
                 uint updatedAtDb = selectQuery.value(record.indexOf("updated_at")).toUInt();
 
                 if (updatedAtFs.toTime_t() != updatedAtDb) {
-                    this->updateFileInfo(iterator.filePath(), hash, updatedAtFs.toTime_t());
+                    //this->updateFileInfo(iterator.filePath(), hash, updatedAtFs.toTime_t());
                     qDebug() << "File modified: (" << QString::number(updatedAtDb) << "," << QString::number(updatedAtFs.toTime_t()) << ")" << iterator.filePath();
+                    emit this->fileChanged(iterator.fileInfo(), hash, updatedAtFs.toTime_t());
                 }
             } else {
-                this->saveFileInfo(iterator.filePath(), hash, updatedAtFs.toTime_t());
+                //this->saveFileInfo(iterator.filePath(), hash, updatedAtFs.toTime_t());
                 qDebug() << "File added:" << iterator.filePath();
+                emit this->fileAdded(iterator.fileInfo(), hash, updatedAtFs.toTime_t());
             }
         }
     }
@@ -127,9 +123,6 @@ void SafeFileSystem::createDatabase() {
     }
 }
 
-/*
- * Slot for QFileSystemWatcher signal
- */
 void SafeFileSystem::directoryChanged(const QString &path) {
     this->reindexDirectory(path);
 }
