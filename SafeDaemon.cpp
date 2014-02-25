@@ -11,7 +11,7 @@ SafeDaemon::SafeDaemon(QObject *parent) : QObject(parent) {
                      QDir::separator() + SAFE_DIR +
                      QDir::separator() + SOCKET_FILE);
 
-    /* CREDENTIALS */
+    /* Credentials */
     QString login = this->settings->value("login", "").toString();
     QString password = this->settings->value("password", "").toString();
 
@@ -19,7 +19,7 @@ SafeDaemon::SafeDaemon(QObject *parent) : QObject(parent) {
         return;
     }
 
-    /* AUTH & INIT FS WATCHER */
+    /* Authorization & FS initialization */
     if(this->apiFactory->authUser(login, password)) {
         this->filesystem = new SafeFileSystem(getFilesystemPath(), STATE_DATABASE, this);
         connect(this->filesystem, &SafeFileSystem::fileAdded, this, &SafeDaemon::fileAdded);
@@ -28,7 +28,7 @@ SafeDaemon::SafeDaemon(QObject *parent) : QObject(parent) {
         connect(this, &SafeDaemon::fileUploaded, this->filesystem, &SafeFileSystem::fileUploaded);
         this->filesystem->startWatching();
     } else {
-        qWarning() << "Auth not complete, усё пропало шеф";
+        qWarning() << "Authorization failed";
     }
 }
 
@@ -148,7 +148,7 @@ void SafeDaemon::fileAdded(const QFileInfo &info, const QString &hash, const uin
 void SafeDaemon::fileChanged(const QFileInfo &info, const QString &hash, const uint &updatedAt) {
     qDebug() << "Uploading file" << info.filePath();
 
-    /* FIX THIS
+    /* Fix this
     uint savedId = this->api->pushFile("227930033757", info.filePath(), info.fileName());
     connect(this->api, &SafeApi::pushFileComplete, [this, info, hash, updatedAt, savedId](ulong id, SafeFile file_info) {
         if (savedId == id) {
