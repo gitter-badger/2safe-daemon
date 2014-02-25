@@ -135,7 +135,6 @@ void SafeDaemon::fileAdded(const QFileInfo &info, const QString &hash, const uin
     qDebug() << "Uploading new file" << info.filePath();
     auto api = this->apiFactory->newApi();
 
-    uint id = api->pushFile("227930033757", info.filePath(), info.fileName());
     connect(api, &SafeApi::pushFileProgress, [](ulong id, ulong bytes, ulong total_bytes){
         qDebug() << "Progress:" << bytes << "/" << total_bytes;
     });
@@ -149,6 +148,7 @@ void SafeDaemon::fileAdded(const QFileInfo &info, const QString &hash, const uin
 void SafeDaemon::fileChanged(const QFileInfo &info, const QString &hash, const uint &updatedAt) {
     qDebug() << "Uploading file" << info.filePath();
 
+    /* FIX THIS
     uint savedId = this->api->pushFile("227930033757", info.filePath(), info.fileName());
     connect(this->api, &SafeApi::pushFileComplete, [this, info, hash, updatedAt, savedId](ulong id, SafeFile file_info) {
         if (savedId == id) {
@@ -157,4 +157,5 @@ void SafeDaemon::fileChanged(const QFileInfo &info, const QString &hash, const u
             emit this->fileUploaded(info, hash, updatedAt);
         }
     });
+    */
 }
