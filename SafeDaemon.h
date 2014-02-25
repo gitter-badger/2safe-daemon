@@ -27,6 +27,10 @@ public:
     QString socketPath();
     ~SafeDaemon();
 
+signals:
+    void fileUploaded(const QFileInfo &info, const QString &hash, const uint &updatedAt);
+    void newFileUploaded(const QFileInfo &info, const QString &hash, const uint &updatedAt);
+
 private:
     SafeApiFactory *apiFactory;
     QLocalServer *server;

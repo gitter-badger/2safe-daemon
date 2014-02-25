@@ -48,6 +48,8 @@ private:
 
 public slots:
     void directoryChanged(const QString &path);
+    void fileUploaded(const QFileInfo &info, const QString &hash, const uint &updatedAt);
+    void newFileUploaded(const QFileInfo &info, const QString &hash, const uint &updatedAt);
 };
 
 #endif // SAFEFILESYSTEM_H

@@ -24,6 +24,8 @@ SafeDaemon::SafeDaemon(QObject *parent) : QObject(parent) {
         this->filesystem = new SafeFileSystem(getFilesystemPath(), STATE_DATABASE, this);
         connect(this->filesystem, &SafeFileSystem::fileAdded, this, &SafeDaemon::fileAdded);
         connect(this->filesystem, &SafeFileSystem::fileChanged, this, &SafeDaemon::fileChanged);
+        connect(this, &SafeDaemon::newFileUploaded, this->filesystem, &SafeFileSystem::newFileUploaded);
+        connect(this, &SafeDaemon::fileUploaded, this->filesystem, &SafeFileSystem::fileUploaded);
         this->filesystem->startWatching();
     } else {
         qWarning() << "Auth not complete, усё пропало шеф";
@@ -130,9 +132,10 @@ void SafeDaemon::handleClientConnection()
 }
 
 void SafeDaemon::fileAdded(const QFileInfo &info, const QString &hash, const uint &updatedAt) {
-    qDebug() << "Uploading file" << info.filePath();
-
+    qDebug() << "Uploading new file" << info.filePath();
     auto api = this->apiFactory->newApi();
+
+    uint id = api->pushFile("227930033757", info.filePath(), info.fileName());
     connect(api, &SafeApi::pushFileProgress, [](ulong id, ulong bytes, ulong total_bytes){
         qDebug() << "Progress:" << bytes << "/" << total_bytes;
     });
@@ -144,5 +147,14 @@ void SafeDaemon::fileAdded(const QFileInfo &info, const QString &hash, const uin
 }
 
 void SafeDaemon::fileChanged(const QFileInfo &info, const QString &hash, const uint &updatedAt) {
+    qDebug() << "Uploading file" << info.filePath();
 
+    uint savedId = this->api->pushFile("227930033757", info.filePath(), info.fileName());
+    connect(this->api, &SafeApi::pushFileComplete, [this, info, hash, updatedAt, savedId](ulong id, SafeFile file_info) {
+        if (savedId == id) {
+            qDebug() << "File uploaded";
+
+            emit this->fileUploaded(info, hash, updatedAt);
+        }
+    });
 }
