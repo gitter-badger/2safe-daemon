@@ -2,7 +2,7 @@
 
 SafeDaemon::SafeDaemon(QObject *parent) : QObject(parent) {
     this->settings = new QSettings(ORG_NAME, APP_NAME, this);
-    this->api = new SafeApi(API_HOST);
+    this->apiFactory = new SafeApiFactory(API_HOST, this);
     this->server = new QLocalServer(this);
 
     connect(server, &QLocalServer::newConnection, this, &SafeDaemon::handleClientConnection);
@@ -11,11 +11,27 @@ SafeDaemon::SafeDaemon(QObject *parent) : QObject(parent) {
                      QDir::separator() + SAFE_DIR +
                      QDir::separator() + SOCKET_FILE);
 
-    this->authUser();
+    /* CREDENTIALS */
+    QString login = this->settings->value("login", "").toString();
+    QString password = this->settings->value("password", "").toString();
+
+    if (login.length() < 1 || password.length() < 1) {
+        return;
+    }
+
+    /* AUTH & INIT FS WATCHER */
+    if(this->apiFactory->authUser(login, password)) {
+        this->filesystem = new SafeFileSystem(getFilesystemPath(), STATE_DATABASE, this);
+        connect(this->filesystem, &SafeFileSystem::fileAdded, this, &SafeDaemon::fileAdded);
+        connect(this->filesystem, &SafeFileSystem::fileChanged, this, &SafeDaemon::fileChanged);
+        this->filesystem->startWatching();
+    } else {
+        qWarning() << "Auth not complete, усё пропало шеф";
+    }
 }
 
 SafeDaemon::~SafeDaemon() {
-    delete this->api;
+
 }
 
 bool SafeDaemon::isListening() {
@@ -24,27 +40,6 @@ bool SafeDaemon::isListening() {
 
 QString SafeDaemon::socketPath() {
     return this->server->fullServerName();
-}
-
-void SafeDaemon::authUser() {
-    QString login = this->settings->value("login", "").toString();
-    QString password = this->settings->value("password", "").toString();
-
-    if (login.length() < 1 || password.length() < 1) {
-        return;
-    }
-
-    connect(this->api, &SafeApi::authUserComplete, this, &SafeDaemon::authUserComplete);
-    this->api->authUser(login, password);
-}
-
-void SafeDaemon::authUserComplete() {
-    qDebug() << "Authorization completed";
-
-    this->filesystem = new SafeFileSystem(getFilesystemPath(), STATE_DATABASE, this);
-    connect(this->filesystem, &SafeFileSystem::fileAdded, this, &SafeDaemon::fileAdded);
-    connect(this->filesystem, &SafeFileSystem::fileChanged, this, &SafeDaemon::fileChanged);
-    this->filesystem->startWatching();
 }
 
 QString SafeDaemon::getFilesystemPath()
@@ -137,7 +132,15 @@ void SafeDaemon::handleClientConnection()
 void SafeDaemon::fileAdded(const QFileInfo &info, const QString &hash, const uint &updatedAt) {
     qDebug() << "Uploading file" << info.filePath();
 
-    uint id = this->api->pushFile("227930033757", info.filePath(), info.fileName());
+    auto api = this->apiFactory->newApi();
+    connect(api, &SafeApi::pushFileProgress, [](ulong id, ulong bytes, ulong total_bytes){
+        qDebug() << "Progress:" << bytes << "/" << total_bytes;
+    });
+    connect(api, &SafeApi::pushFileComplete, [](ulong id, SafeFile file_info){
+        qDebug() << "File uploaded:" << file_info.name;
+    });
+
+    uint id = api->pushFile("227930033757", info.filePath(), info.fileName());
 }
 
 void SafeDaemon::fileChanged(const QFileInfo &info, const QString &hash, const uint &updatedAt) {

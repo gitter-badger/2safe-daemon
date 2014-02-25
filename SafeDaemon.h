@@ -14,6 +14,7 @@
 #include <QFileInfo>
 #include <lib2safe/safeapi.h>
 
+#include "safeapifactory.h"
 #include "safefilesystem.h"
 #include "safecommon.h"
 
@@ -27,12 +28,11 @@ public:
     ~SafeDaemon();
 
 private:
-    SafeApi *api;
+    SafeApiFactory *apiFactory;
     QLocalServer *server;
     QSettings *settings;
     SafeFileSystem *filesystem;
 
-    void authUser();
     void bindServer(QLocalServer *server, QString path);
 
     QJsonObject formSettingsReply(const QJsonArray &requestFields);
@@ -40,7 +40,6 @@ private:
 
 private slots:
     void handleClientConnection();
-    void authUserComplete();
     void fileAdded(const QFileInfo &info, const QString &hash, const uint &updatedAt);
     void fileChanged(const QFileInfo &info, const QString &hash, const uint &updatedAt);
 };

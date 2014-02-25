@@ -11,11 +11,13 @@ TEMPLATE = app
 
 SOURCES += main.cpp \
     safedaemon.cpp \
-    safefilesystem.cpp
+    safefilesystem.cpp \
+    safeapifactory.cpp
 
 include(lib2safe/safe.pri)
 
 HEADERS += \
     safedaemon.h \
     safefilesystem.h \
-    safecommon.h
+    safecommon.h \
+    safeapifactory.h
