@@ -19,7 +19,7 @@ SafeDaemon::SafeDaemon(QObject *parent) : QObject(parent) {
         return;
     }
 
-    /* Authorization & FS initialization */
+    /* Authentication & FS initialization */
     if(this->apiFactory->authUser(login, password)) {
         this->filesystem = new SafeFileSystem(getFilesystemPath(), STATE_DATABASE, this);
         connect(this->filesystem, &SafeFileSystem::fileAdded, this, &SafeDaemon::fileAdded);
@@ -28,7 +28,7 @@ SafeDaemon::SafeDaemon(QObject *parent) : QObject(parent) {
         connect(this, &SafeDaemon::fileUploaded, this->filesystem, &SafeFileSystem::fileUploaded);
         this->filesystem->startWatching();
     } else {
-        qWarning() << "Authorization failed";
+        qWarning() << "Authentication failed";
     }
 }
 
@@ -133,29 +133,34 @@ void SafeDaemon::handleClientConnection()
 
 void SafeDaemon::fileAdded(const QFileInfo &info, const QString &hash, const uint &updatedAt) {
     qDebug() << "Uploading new file" << info.filePath();
+
     auto api = this->apiFactory->newApi();
 
-    connect(api, &SafeApi::pushFileProgress, [](ulong id, ulong bytes, ulong total_bytes){
-        qDebug() << "Progress:" << bytes << "/" << total_bytes;
+    connect(api, &SafeApi::pushFileProgress, [=](ulong id, ulong bytes, ulong totalBytes){
+        qDebug() << "Progress:" << bytes << "/" << totalBytes;
     });
-    connect(api, &SafeApi::pushFileComplete, [](ulong id, SafeFile file_info){
-        qDebug() << "File uploaded:" << file_info.name;
+    connect(api, &SafeApi::pushFileComplete, [=](ulong id, SafeFile fileInfo) {
+        qDebug() << "New file uploaded:" << fileInfo.name;
+
+        emit this->newFileUploaded(info, hash, updatedAt);
     });
 
-    uint id = api->pushFile("227930033757", info.filePath(), info.fileName());
+    api->pushFile("227930033757", info.filePath(), info.fileName());
 }
 
 void SafeDaemon::fileChanged(const QFileInfo &info, const QString &hash, const uint &updatedAt) {
     qDebug() << "Uploading file" << info.filePath();
 
-    /* Fix this
-    uint savedId = this->api->pushFile("227930033757", info.filePath(), info.fileName());
-    connect(this->api, &SafeApi::pushFileComplete, [this, info, hash, updatedAt, savedId](ulong id, SafeFile file_info) {
-        if (savedId == id) {
-            qDebug() << "File uploaded";
+    auto api = this->apiFactory->newApi();
 
-            emit this->fileUploaded(info, hash, updatedAt);
-        }
+    connect(api, &SafeApi::pushFileProgress, [=](ulong id, ulong bytes, ulong totalBytes){
+        qDebug() << "Progress:" << bytes << "/" << totalBytes;
     });
-    */
+    connect(api, &SafeApi::pushFileComplete, [=](ulong id, SafeFile fileInfo){
+        qDebug() << "File uploaded:" << fileInfo.name;
+
+        emit this->fileUploaded(info, hash, updatedAt);
+    });
+
+    api->pushFile("227930033757", info.filePath(), info.fileName());
 }
