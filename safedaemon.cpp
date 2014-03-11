@@ -220,9 +220,7 @@ void SafeDaemon::fileAdded(const QString &path) {
     QString hash(QCryptographicHash::hash(path.toUtf8(), QCryptographicHash::Md5).toHex());
     uint updatedAt = info.lastModified().toTime_t();
 
-    qDebug() << "Uploading new file" << info.filePath();
-
-    this->startUploading(path);
+    qDebug() << "Uploading new file" << path;
 
     auto api = this->apiFactory->newApi();
     connect(api, &SafeApi::pushFileProgress, [=](ulong id, ulong bytes, ulong totalBytes){
@@ -231,10 +229,11 @@ void SafeDaemon::fileAdded(const QString &path) {
     connect(api, &SafeApi::pushFileComplete, [=](ulong id, SafeFile fileInfo) {
         qDebug() << "New file uploaded:" << fileInfo.name;
 
-        this->newFileUploaded(info.filePath(), hash, updatedAt);
+        this->newFileUploaded(path, hash, updatedAt);
     });
 
-    api->pushFile("227930033757", info.filePath(), info.fileName(), this->isUploading(path));
+    api->pushFile("227930033757", path, info.fileName(), this->isUploading(path));
+    this->startUploading(path);
 }
 
 void SafeDaemon::fileModified(const QString &path) {
@@ -244,9 +243,7 @@ void SafeDaemon::fileModified(const QString &path) {
     QString hash(QCryptographicHash::hash(path.toUtf8(), QCryptographicHash::Md5).toHex());
     uint updatedAt = info.lastModified().toTime_t();
 
-    qDebug() << "Uploading file" << info.filePath();
-
-    this->startUploading(path);
+    qDebug() << "Uploading file" << path;
 
     auto api = this->apiFactory->newApi();
     connect(api, &SafeApi::pushFileProgress, [=](ulong id, ulong bytes, ulong totalBytes){
@@ -255,10 +252,11 @@ void SafeDaemon::fileModified(const QString &path) {
     connect(api, &SafeApi::pushFileComplete, [=](ulong id, SafeFile fileInfo){
         qDebug() << "File uploaded:" << fileInfo.name;
 
-        this->fileUploaded(info.filePath(), hash, updatedAt);
+        this->fileUploaded(path, hash, updatedAt);
     });
 
-    api->pushFile("227930033757", info.filePath(), info.fileName(), this->isUploading(path));
+    api->pushFile("227930033757", path, info.fileName(), this->isUploading(path));
+    this->startUploading(path);
 }
 
 void SafeDaemon::saveFileInfo(const QString &path, const QString &hash, const uint &updatedAt) {
