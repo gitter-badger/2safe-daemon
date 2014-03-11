@@ -11,7 +11,6 @@ TEMPLATE = app
 
 SOURCES += main.cpp \
     safedaemon.cpp \
-    safefilesystem.cpp \
     safeapifactory.cpp \
     fswatcher.cpp
 
@@ -19,7 +18,6 @@ include(lib2safe/safe.pri)
 
 HEADERS += \
     safedaemon.h \
-    safefilesystem.h \
     safecommon.h \
     safeapifactory.h \
     fswatcher.h

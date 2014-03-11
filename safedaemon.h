@@ -12,10 +12,24 @@
 #include <QJsonParseError>
 #include <QTextStream>
 #include <QFileInfo>
+#include <QFile>
+#include <QIODevice>
+#include <QTextStream>
+#include <QDir>
+#include <QFileInfoList>
+#include <QFileInfo>
+#include <QDirIterator>
+#include <QSqlDatabase>
+#include <QStandardPaths>
+#include <QDateTime>
+#include <QSqlQuery>
+#include <QSqlRecord>
+#include <QCryptographicHash>
+#include <QSqlError>
 #include <lib2safe/safeapi.h>
 
 #include "safeapifactory.h"
-#include "safefilesystem.h"
+#include "fswatcher.h"
 #include "safecommon.h"
 
 class SafeDaemon : public QObject {
@@ -25,27 +39,34 @@ public:
     SafeDaemon(QObject *parent = 0);
     bool isListening();
     QString socketPath();
-    ~SafeDaemon();
 
 signals:
-    void fileUploaded(const QFileInfo &info, const QString &hash, const uint &updatedAt);
-    void newFileUploaded(const QFileInfo &info, const QString &hash, const uint &updatedAt);
+    void fileUploaded(const QString &path, const QString &hash, const uint &updatedAt);
+    void newFileUploaded(const QString &path, const QString &hash, const uint &updatedAt);
 
 private:
     SafeApiFactory *apiFactory;
     QLocalServer *server;
     QSettings *settings;
-    SafeFileSystem *filesystem;
+    FSWatcher *watcher;
+    QSqlDatabase database;
 
+    bool authenticateUser();
     void bindServer(QLocalServer *server, QString path);
+    void initWatcher(const QString &path);
+    void initDatabase(const QString &name);
+    void createDatabase();
+    void reindexDirectory(const QString &path);
 
     QJsonObject formSettingsReply(const QJsonArray &requestFields);
     QString getFilesystemPath();
 
 private slots:
     void handleClientConnection();
-    void fileAdded(const QFileInfo &info, const QString &hash, const uint &updatedAt);
-    void fileChanged(const QFileInfo &info, const QString &hash, const uint &updatedAt);
+    void fileAdded(const QString &path);
+    void fileModified(const QString &hash);
+    void saveFileInfo(const QString &path, const QString &hash, const uint &updatedAt);
+    void updateFileInfo(const QString &path, const QString &hash, const uint &updatedAt);
 };
 
 #endif // SAFEDAEMON_H

@@ -11,29 +11,74 @@ SafeDaemon::SafeDaemon(QObject *parent) : QObject(parent) {
                      QDir::separator() + SAFE_DIR +
                      QDir::separator() + SOCKET_FILE);
 
+    if (this->authenticateUser()) {
+        this->initWatcher(getFilesystemPath());
+    }
+}
+
+bool SafeDaemon::authenticateUser() {
     /* Credentials */
     QString login = this->settings->value("login", "").toString();
     QString password = this->settings->value("password", "").toString();
 
     if (login.length() < 1 || password.length() < 1) {
-        return;
+        return false;
     }
 
     /* Authentication & FS initialization */
     if(this->apiFactory->authUser(login, password)) {
-        this->filesystem = new SafeFileSystem(getFilesystemPath(), STATE_DATABASE, this);
-        connect(this->filesystem, &SafeFileSystem::fileAddedSignal, this, &SafeDaemon::fileAdded);
-        connect(this->filesystem, &SafeFileSystem::fileModifiedSignal, this, &SafeDaemon::fileChanged);
-        connect(this, &SafeDaemon::newFileUploaded, this->filesystem, &SafeFileSystem::newFileUploaded);
-        connect(this, &SafeDaemon::fileUploaded, this->filesystem, &SafeFileSystem::fileUploaded);
-        this->filesystem->startWatching();
+        this->initDatabase(STATE_DATABASE);
+        connect(this, &SafeDaemon::newFileUploaded, this, &SafeDaemon::saveFileInfo);
+        connect(this, &SafeDaemon::fileUploaded, this, &SafeDaemon::updateFileInfo);
     } else {
         qWarning() << "Authentication failed";
     }
+
+    return true;
 }
 
-SafeDaemon::~SafeDaemon() {
+void SafeDaemon::initWatcher(const QString &path) {
+    this->watcher = new FSWatcher(path, this);
+    connect(this->watcher, &FSWatcher::added, this, &SafeDaemon::fileAdded);
+    //connect(this->watcher, &FSWatcher::modified, this, &SafeDaemon::fileModified);
+    this->watcher->watch();
 
+    QDirIterator iterator(path, QDir::Dirs | QDir::NoDotAndDotDot, QDirIterator::Subdirectories);
+    this->reindexDirectory(path);
+    while (iterator.hasNext()) {
+        this->reindexDirectory(iterator.next());
+    }
+}
+
+void SafeDaemon::initDatabase(const QString &name) {
+    QString databaseDirectory = QStandardPaths::writableLocation(QStandardPaths::DataLocation);
+
+    if (databaseDirectory.isEmpty()) {
+        qDebug() << "Can not find database location";
+    } else {
+        if (!QDir(databaseDirectory).exists()) {
+            QDir().mkpath(databaseDirectory);
+        }
+
+        QString databasePath = QDir(databaseDirectory).filePath(name);
+        qDebug() << "Using database path:" << databasePath;
+
+        this->database = QSqlDatabase::addDatabase("QSQLITE");
+        this->database.setDatabaseName(databasePath);
+
+        if (!this->database.open()) {
+            qDebug() << "Can not open database";
+        }
+    }
+}
+
+void SafeDaemon::createDatabase() {
+    QSqlQuery query(this->database);
+    query.prepare("CREATE TABLE IF NOT EXISTS files (hash VARCHAR(32) PRIMARY KEY, path TEXT, updated_at INTEGER)");
+
+    if (!query.exec()) {
+        qDebug() << "Can not run database query";
+    }
 }
 
 bool SafeDaemon::isListening() {
@@ -131,7 +176,47 @@ void SafeDaemon::handleClientConnection()
     socket->close();
 }
 
-void SafeDaemon::fileAdded(const QFileInfo &info, const QString &hash, const uint &updatedAt) {
+void SafeDaemon::reindexDirectory(const QString &path) {
+    QDirIterator iterator(path, QDir::Files);
+
+    while (iterator.hasNext()) {
+        iterator.next();
+
+        QFileInfo info = iterator.fileInfo();
+        QDateTime updatedAtFs = info.lastModified();
+
+        QSqlQuery selectQuery(this->database);
+        QString hash(QCryptographicHash::hash(iterator.filePath().toUtf8(), QCryptographicHash::Md5).toHex());
+        selectQuery.prepare("SELECT * FROM files WHERE hash = :hash");
+        selectQuery.bindValue(":hash", hash);
+
+        if (!selectQuery.exec()) {
+            qDebug() << "Can not run database query";
+        } else {
+            QSqlRecord record = selectQuery.record();
+
+            if (selectQuery.next()) {
+                uint updatedAtDb = selectQuery.value(record.indexOf("updated_at")).toUInt();
+
+                if (updatedAtFs.toTime_t() != updatedAtDb) {
+                    qDebug() << "File modified:" << iterator.filePath();
+                    emit this->fileModified(iterator.filePath());
+                }
+            } else {
+                qDebug() << "File added:" << iterator.filePath();
+                emit this->fileAdded(iterator.filePath());
+            }
+        }
+    }
+}
+
+void SafeDaemon::fileAdded(const QString &path) {
+    qDebug() << "File added: " << path;
+
+    QFileInfo info(path);
+    QString hash(QCryptographicHash::hash(path.toUtf8(), QCryptographicHash::Md5).toHex());
+    uint updatedAt = info.lastModified().toTime_t();
+
     qDebug() << "Uploading new file" << info.filePath();
 
     auto api = this->apiFactory->newApi();
@@ -142,13 +227,19 @@ void SafeDaemon::fileAdded(const QFileInfo &info, const QString &hash, const uin
     connect(api, &SafeApi::pushFileComplete, [=](ulong id, SafeFile fileInfo) {
         qDebug() << "New file uploaded:" << fileInfo.name;
 
-        emit this->newFileUploaded(info, hash, updatedAt);
+        this->newFileUploaded(info.filePath(), hash, updatedAt);
     });
 
     api->pushFile("227930033757", info.filePath(), info.fileName());
 }
 
-void SafeDaemon::fileChanged(const QFileInfo &info, const QString &hash, const uint &updatedAt) {
+void SafeDaemon::fileModified(const QString &path) {
+    qDebug() << "File modified: " << path;
+
+    QFileInfo info(path);
+    QString hash(QCryptographicHash::hash(path.toUtf8(), QCryptographicHash::Md5).toHex());
+    uint updatedAt = info.lastModified().toTime_t();
+
     qDebug() << "Uploading file" << info.filePath();
 
     auto api = this->apiFactory->newApi();
@@ -159,8 +250,32 @@ void SafeDaemon::fileChanged(const QFileInfo &info, const QString &hash, const u
     connect(api, &SafeApi::pushFileComplete, [=](ulong id, SafeFile fileInfo){
         qDebug() << "File uploaded:" << fileInfo.name;
 
-        emit this->fileUploaded(info, hash, updatedAt);
+        this->fileUploaded(info.filePath(), hash, updatedAt);
     });
 
     api->pushFile("227930033757", info.filePath(), info.fileName());
+}
+
+void SafeDaemon::saveFileInfo(const QString &path, const QString &hash, const uint &updatedAt) {
+    QSqlQuery query(this->database);
+    query.prepare("INSERT INTO files (hash, path, updated_at) VALUES (:hash, :path, :updated_at)");
+    query.bindValue(":hash", hash);
+    query.bindValue(":path", path);
+    query.bindValue(":updated_at", updatedAt);
+
+    if (!query.exec()) {
+        qDebug() << "Can not run database query:" << query.lastError().text();
+    }
+}
+
+void SafeDaemon::updateFileInfo(const QString &path, const QString &hash, const uint &updatedAt) {
+    QSqlQuery query(this->database);
+    query.prepare("UPDATE files SET path = :path, updated_at = :updated_at WHERE hash = :hash");
+    query.bindValue(":hash", hash);
+    query.bindValue(":path", path);
+    query.bindValue(":updated_at", updatedAt);
+
+    if (!query.exec()) {
+        qDebug() << "Can not run database query:" << query.lastError().text();
+    }
 }
