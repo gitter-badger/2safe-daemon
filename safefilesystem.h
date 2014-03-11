@@ -3,7 +3,6 @@
 
 #include <QObject>
 #include <QString>
-#include <QFileSystemWatcher>
 #include <QFile>
 #include <QIODevice>
 #include <QTextStream>
@@ -20,23 +19,24 @@
 #include <QSqlError>
 #include <QDebug>
 
+#include "fswatcher.h"
+
 class SafeFileSystem : public QObject {
     Q_OBJECT
 
 public:
     SafeFileSystem(const QString &path, const QString &databaseName, QObject *parent);
-    ~SafeFileSystem();
     void startWatching();
 
 signals:
     void indexingStarted();
     void indexingFinished();
-    void fileAdded(const QFileInfo &info, const QString &path, const uint &updatedAt);
-    void fileChanged(const QFileInfo &info, const QString &path, const uint &updatedAt);
+    void fileAddedSignal(const QFileInfo &info, const QString &path, const uint &updatedAt);
+    void fileModifiedSignal(const QFileInfo &info, const QString &path, const uint &updatedAt);
 
 private:
     QString directory, databaseName;
-    QFileSystemWatcher watcher;
+    FSWatcher *watcher;
     QSqlDatabase database;
 
     void initWatcher();
@@ -47,9 +47,11 @@ private:
     void updateFileInfo(const QString &path, const QString &hash, const uint &updatedAt);
 
 public slots:
-    void directoryChanged(const QString &path);
     void fileUploaded(const QFileInfo &info, const QString &hash, const uint &updatedAt);
     void newFileUploaded(const QFileInfo &info, const QString &hash, const uint &updatedAt);
+
+    void fileAdded(const QString &path);
+    void fileModified(const QString &path);
 };
 
 #endif // SAFEFILESYSTEM_H

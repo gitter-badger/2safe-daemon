@@ -5,18 +5,6 @@ SafeFileSystem::SafeFileSystem(const QString &path, const QString &databaseName,
     this->databaseName = databaseName;
 }
 
-SafeFileSystem::~SafeFileSystem() {
-    QDirIterator directoryIterator(this->directory, QDir::Dirs | QDir::NoDotAndDotDot, QDirIterator::Subdirectories);
-    QStringList directories;
-
-    directories.append(this->directory);
-    while (directoryIterator.hasNext()) {
-        directories.append(directoryIterator.next());
-    }
-
-    this->watcher.removePaths(directories);
-}
-
 void SafeFileSystem::startWatching() {
     this->initDatabase();
     this->createDatabase();
@@ -46,20 +34,15 @@ void SafeFileSystem::initDatabase() {
 }
 
 void SafeFileSystem::initWatcher() {
-    QDirIterator directoryIterator(this->directory, QDir::Dirs | QDir::NoDotAndDotDot, QDirIterator::Subdirectories);
-    QStringList directories;
+    this->watcher = new FSWatcher(this->directory, this);
+    connect(this->watcher, &FSWatcher::added, this, &SafeFileSystem::fileAdded);
+    //connect(this->watcher, &FSWatcher::modified, this, &SafeFileSystem::fileModified);
+    this->watcher->watch();
 
-    directories.append(this->directory);
-    while (directoryIterator.hasNext()) {
-        directories.append(directoryIterator.next());
-    }
-
-    this->watcher.addPaths(directories);
-    connect(&this->watcher, &QFileSystemWatcher::directoryChanged, this, &SafeFileSystem::directoryChanged);
-
-    QStringListIterator stringIterator(directories);
-    while (stringIterator.hasNext()) {
-         this->reindexDirectory(stringIterator.next());
+    QDirIterator iterator(this->directory, QDir::Dirs | QDir::NoDotAndDotDot, QDirIterator::Subdirectories);
+    this->reindexDirectory(this->directory);
+    while (iterator.hasNext()) {
+        this->reindexDirectory(iterator.next());
     }
 }
 
@@ -86,14 +69,12 @@ void SafeFileSystem::reindexDirectory(const QString &path) {
                 uint updatedAtDb = selectQuery.value(record.indexOf("updated_at")).toUInt();
 
                 if (updatedAtFs.toTime_t() != updatedAtDb) {
-                    //this->updateFileInfo(iterator.filePath(), hash, updatedAtFs.toTime_t());
-                    qDebug() << "File modified: (" << QString::number(updatedAtDb) << "," << QString::number(updatedAtFs.toTime_t()) << ")" << iterator.filePath();
-                    emit this->fileChanged(iterator.fileInfo(), hash, updatedAtFs.toTime_t());
+                    qDebug() << "File modified:" << iterator.filePath();
+                    emit this->fileModifiedSignal(iterator.fileInfo(), hash, updatedAtFs.toTime_t());
                 }
             } else {
-                //this->saveFileInfo(iterator.filePath(), hash, updatedAtFs.toTime_t());
                 qDebug() << "File added:" << iterator.filePath();
-                emit this->fileAdded(iterator.fileInfo(), hash, updatedAtFs.toTime_t());
+                emit this->fileAddedSignal(iterator.fileInfo(), hash, updatedAtFs.toTime_t());
             }
         }
     }
@@ -132,10 +113,6 @@ void SafeFileSystem::createDatabase() {
     }
 }
 
-void SafeFileSystem::directoryChanged(const QString &path) {
-    this->reindexDirectory(path);
-}
-
 void SafeFileSystem::newFileUploaded(const QFileInfo &info, const QString &hash, const uint &updatedAt) {
     qDebug() << "New file info saved";
 
@@ -146,4 +123,20 @@ void SafeFileSystem::fileUploaded(const QFileInfo &info, const QString &hash, co
     qDebug() << "File info updated";
 
     this->updateFileInfo(info.filePath(), hash, updatedAt);
+}
+
+void SafeFileSystem::fileAdded(const QString &path) {
+    qDebug() << "File added: " << path;
+
+    QFileInfo info(path);
+    QString hash(QCryptographicHash::hash(path.toUtf8(), QCryptographicHash::Md5).toHex());
+    emit this->fileAddedSignal(info, hash, info.lastModified().toTime_t());
+}
+
+void SafeFileSystem::fileModified(const QString &path) {
+    qDebug() << "File modified: " << path;
+
+    QFileInfo info(path);
+    QString hash(QCryptographicHash::hash(path.toUtf8(), QCryptographicHash::Md5).toHex());
+    emit this->fileAddedSignal(info, hash, info.lastModified().toTime_t());
 }

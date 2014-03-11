@@ -22,8 +22,8 @@ SafeDaemon::SafeDaemon(QObject *parent) : QObject(parent) {
     /* Authentication & FS initialization */
     if(this->apiFactory->authUser(login, password)) {
         this->filesystem = new SafeFileSystem(getFilesystemPath(), STATE_DATABASE, this);
-        connect(this->filesystem, &SafeFileSystem::fileAdded, this, &SafeDaemon::fileAdded);
-        connect(this->filesystem, &SafeFileSystem::fileChanged, this, &SafeDaemon::fileChanged);
+        connect(this->filesystem, &SafeFileSystem::fileAddedSignal, this, &SafeDaemon::fileAdded);
+        connect(this->filesystem, &SafeFileSystem::fileModifiedSignal, this, &SafeDaemon::fileChanged);
         connect(this, &SafeDaemon::newFileUploaded, this->filesystem, &SafeFileSystem::newFileUploaded);
         connect(this, &SafeDaemon::fileUploaded, this->filesystem, &SafeFileSystem::fileUploaded);
         this->filesystem->startWatching();
