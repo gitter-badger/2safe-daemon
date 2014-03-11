@@ -12,6 +12,11 @@ SafeDaemon::SafeDaemon(QObject *parent) : QObject(parent) {
                      QDir::separator() + SOCKET_FILE);
 
     if (this->authenticateUser()) {
+        connect(this, &SafeDaemon::newFileUploaded, this, &SafeDaemon::saveFileInfo);
+        connect(this, &SafeDaemon::fileUploaded, this, &SafeDaemon::updateFileInfo);
+
+        this->progress = new QMap<QString, uint>();
+        this->initDatabase(STATE_DATABASE);
         this->initWatcher(getFilesystemPath());
     }
 }
@@ -26,12 +31,10 @@ bool SafeDaemon::authenticateUser() {
     }
 
     /* Authentication & FS initialization */
-    if(this->apiFactory->authUser(login, password)) {
-        this->initDatabase(STATE_DATABASE);
-        connect(this, &SafeDaemon::newFileUploaded, this, &SafeDaemon::saveFileInfo);
-        connect(this, &SafeDaemon::fileUploaded, this, &SafeDaemon::updateFileInfo);
-    } else {
+    if(!this->apiFactory->authUser(login, password)) {
         qWarning() << "Authentication failed";
+
+        return false;
     }
 
     return true;
@@ -40,7 +43,7 @@ bool SafeDaemon::authenticateUser() {
 void SafeDaemon::initWatcher(const QString &path) {
     this->watcher = new FSWatcher(path, this);
     connect(this->watcher, &FSWatcher::added, this, &SafeDaemon::fileAdded);
-    //connect(this->watcher, &FSWatcher::modified, this, &SafeDaemon::fileModified);
+    connect(this->watcher, &FSWatcher::modified, this, &SafeDaemon::fileModified);
     this->watcher->watch();
 
     QDirIterator iterator(path, QDir::Dirs | QDir::NoDotAndDotDot, QDirIterator::Subdirectories);
@@ -185,18 +188,18 @@ void SafeDaemon::reindexDirectory(const QString &path) {
         QFileInfo info = iterator.fileInfo();
         QDateTime updatedAtFs = info.lastModified();
 
-        QSqlQuery selectQuery(this->database);
+        QSqlQuery query(this->database);
         QString hash(QCryptographicHash::hash(iterator.filePath().toUtf8(), QCryptographicHash::Md5).toHex());
-        selectQuery.prepare("SELECT * FROM files WHERE hash = :hash");
-        selectQuery.bindValue(":hash", hash);
+        query.prepare("SELECT * FROM files WHERE hash = :hash");
+        query.bindValue(":hash", hash);
 
-        if (!selectQuery.exec()) {
+        if (!query.exec()) {
             qDebug() << "Can not run database query";
         } else {
-            QSqlRecord record = selectQuery.record();
+            QSqlRecord record = query.record();
 
-            if (selectQuery.next()) {
-                uint updatedAtDb = selectQuery.value(record.indexOf("updated_at")).toUInt();
+            if (query.next()) {
+                uint updatedAtDb = query.value(record.indexOf("updated_at")).toUInt();
 
                 if (updatedAtFs.toTime_t() != updatedAtDb) {
                     qDebug() << "File modified:" << iterator.filePath();
@@ -219,8 +222,9 @@ void SafeDaemon::fileAdded(const QString &path) {
 
     qDebug() << "Uploading new file" << info.filePath();
 
-    auto api = this->apiFactory->newApi();
+    this->startUploading(path);
 
+    auto api = this->apiFactory->newApi();
     connect(api, &SafeApi::pushFileProgress, [=](ulong id, ulong bytes, ulong totalBytes){
         qDebug() << "Progress:" << bytes << "/" << totalBytes;
     });
@@ -230,7 +234,7 @@ void SafeDaemon::fileAdded(const QString &path) {
         this->newFileUploaded(info.filePath(), hash, updatedAt);
     });
 
-    api->pushFile("227930033757", info.filePath(), info.fileName());
+    api->pushFile("227930033757", info.filePath(), info.fileName(), this->isUploading(path));
 }
 
 void SafeDaemon::fileModified(const QString &path) {
@@ -242,8 +246,9 @@ void SafeDaemon::fileModified(const QString &path) {
 
     qDebug() << "Uploading file" << info.filePath();
 
-    auto api = this->apiFactory->newApi();
+    this->startUploading(path);
 
+    auto api = this->apiFactory->newApi();
     connect(api, &SafeApi::pushFileProgress, [=](ulong id, ulong bytes, ulong totalBytes){
         qDebug() << "Progress:" << bytes << "/" << totalBytes;
     });
@@ -253,7 +258,7 @@ void SafeDaemon::fileModified(const QString &path) {
         this->fileUploaded(info.filePath(), hash, updatedAt);
     });
 
-    api->pushFile("227930033757", info.filePath(), info.fileName());
+    api->pushFile("227930033757", info.filePath(), info.fileName(), this->isUploading(path));
 }
 
 void SafeDaemon::saveFileInfo(const QString &path, const QString &hash, const uint &updatedAt) {
@@ -266,6 +271,8 @@ void SafeDaemon::saveFileInfo(const QString &path, const QString &hash, const ui
     if (!query.exec()) {
         qDebug() << "Can not run database query:" << query.lastError().text();
     }
+
+    this->finishUploading(hash);
 }
 
 void SafeDaemon::updateFileInfo(const QString &path, const QString &hash, const uint &updatedAt) {
@@ -278,4 +285,22 @@ void SafeDaemon::updateFileInfo(const QString &path, const QString &hash, const 
     if (!query.exec()) {
         qDebug() << "Can not run database query:" << query.lastError().text();
     }
+
+    this->finishUploading(hash);
+}
+
+bool SafeDaemon::isUploading(const QString &path) {
+    return this->progress->contains(path);
+}
+
+void SafeDaemon::startUploading(const QString &path) {
+    this->progress->insert(path, 0);
+}
+
+void SafeDaemon::updateUploadingProgress(const QString &path, uint &progress) {
+    this->progress->insert(path, progress);
+}
+
+void SafeDaemon::finishUploading(const QString &path) {
+    this->progress->remove(path);
 }

@@ -26,6 +26,7 @@
 #include <QSqlRecord>
 #include <QCryptographicHash>
 #include <QSqlError>
+#include <QMap>
 #include <lib2safe/safeapi.h>
 
 #include "safeapifactory.h"
@@ -50,6 +51,7 @@ private:
     QSettings *settings;
     FSWatcher *watcher;
     QSqlDatabase database;
+    QMap<QString, uint> *progress;
 
     bool authenticateUser();
     void bindServer(QLocalServer *server, QString path);
@@ -60,6 +62,10 @@ private:
 
     QJsonObject formSettingsReply(const QJsonArray &requestFields);
     QString getFilesystemPath();
+    bool isUploading(const QString &path);
+    void startUploading(const QString &path);
+    void updateUploadingProgress(const QString &path, uint &progress);
+    void finishUploading(const QString &path);
 
 private slots:
     void handleClientConnection();
