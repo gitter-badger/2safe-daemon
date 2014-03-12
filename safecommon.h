@@ -14,5 +14,6 @@
 #define REPLY_SETTINGS_TYPE "settings"
 #define ACTION_TYPE "action"
 #define API_CALL "api_call"
+#define NOOP "noop"
 
 #endif // SAFECOMMON_H

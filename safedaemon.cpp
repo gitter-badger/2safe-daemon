@@ -176,6 +176,9 @@ void SafeDaemon::handleClientConnection()
         }
     } else if (type == API_CALL) {
         // XXX
+    } else if (type == NOOP) {
+        stream << "noop.";
+        stream.flush();
     } else {
         qWarning() << "Got message of unknown type:" << type;
     }
