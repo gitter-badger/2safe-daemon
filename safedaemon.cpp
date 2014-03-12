@@ -71,7 +71,9 @@ void SafeDaemon::initDatabase(const QString &name) {
         this->database = QSqlDatabase::addDatabase("QSQLITE");
         this->database.setDatabaseName(databasePath);
 
-        if (!this->database.open()) {
+        if (this->database.open()) {
+            this->createDatabase();
+        } else {
             qDebug() << "Can not open database";
         }
     }
@@ -194,6 +196,7 @@ void SafeDaemon::indexDirectory(const QString &path) {
         QDateTime updatedAtFs = info.lastModified();
 
         QSqlQuery query(this->database);
+        // Why the fuck bindValue does not work?
         query.prepare("SELECT * FROM files WHERE hash = :hash");
         query.bindValue(":hash", hash);
 
@@ -224,6 +227,12 @@ void SafeDaemon::fileAdded(const QString &path) {
     QString hash(QCryptographicHash::hash(path.toUtf8(), QCryptographicHash::Md5).toHex());
     uint updatedAt = info.lastModified().toTime_t();
 
+    if (!this->isFileAllowed(info)) {
+        qDebug() << "Ignoring file" << path;
+
+        return;
+    }
+
     qDebug() << "Uploading new file" << path;
 
     auto api = this->apiFactory->newApi();
@@ -246,6 +255,12 @@ void SafeDaemon::fileModified(const QString &path) {
     QFileInfo info(path);
     QString hash(QCryptographicHash::hash(path.toUtf8(), QCryptographicHash::Md5).toHex());
     uint updatedAt = info.lastModified().toTime_t();
+
+    if (!this->isFileAllowed(info)) {
+        qDebug() << "Ignoring file" << path;
+
+        return;
+    }
 
     qDebug() << "Uploading file" << path;
 
@@ -305,4 +320,8 @@ void SafeDaemon::updateUploadingProgress(const QString &path, uint &progress) {
 
 void SafeDaemon::finishUploading(const QString &path) {
     this->progress->remove(path);
+}
+
+bool SafeDaemon::isFileAllowed(const QFileInfo &info) {
+    return !info.fileName().startsWith(".");
 }

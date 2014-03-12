@@ -62,6 +62,8 @@ private:
 
     QJsonObject formSettingsReply(const QJsonArray &requestFields);
     QString getFilesystemPath();
+    bool isFileAllowed(const QFileInfo &info);
+
     bool isUploading(const QString &path);
     void startUploading(const QString &path);
     void updateUploadingProgress(const QString &path, uint &progress);

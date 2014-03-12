@@ -24,7 +24,7 @@ FSWatcher::FSWatcher(QString path, QObject *parent) :
         return;
     }
 
-    qDebug() << "Watches established";
+    qDebug() << "Watcher established";
 }
 
 void FSWatcher::watch()
