@@ -42,15 +42,17 @@ bool SafeDaemon::authenticateUser() {
 
 void SafeDaemon::initWatcher(const QString &path) {
     this->watcher = new FSWatcher(path, this);
+
     connect(this->watcher, &FSWatcher::added, this, &SafeDaemon::fileAdded);
     connect(this->watcher, &FSWatcher::modified, this, &SafeDaemon::fileModified);
-    this->watcher->watch();
 
     QDirIterator iterator(path, QDir::Dirs | QDir::NoDotAndDotDot, QDirIterator::Subdirectories);
-    this->reindexDirectory(path);
+    this->indexDirectory(path);
     while (iterator.hasNext()) {
-        this->reindexDirectory(iterator.next());
+        this->indexDirectory(iterator.next());
     }
+
+    this->watcher->watch();
 }
 
 void SafeDaemon::initDatabase(const QString &name) {
@@ -179,22 +181,24 @@ void SafeDaemon::handleClientConnection()
     socket->close();
 }
 
-void SafeDaemon::reindexDirectory(const QString &path) {
+void SafeDaemon::indexDirectory(const QString &path) {
+    qDebug() << "Indexing" << path;
+
     QDirIterator iterator(path, QDir::Files);
 
     while (iterator.hasNext()) {
         iterator.next();
 
         QFileInfo info = iterator.fileInfo();
+        QString hash(QCryptographicHash::hash(iterator.filePath().toUtf8(), QCryptographicHash::Md5).toHex());
         QDateTime updatedAtFs = info.lastModified();
 
         QSqlQuery query(this->database);
-        QString hash(QCryptographicHash::hash(iterator.filePath().toUtf8(), QCryptographicHash::Md5).toHex());
         query.prepare("SELECT * FROM files WHERE hash = :hash");
         query.bindValue(":hash", hash);
 
         if (!query.exec()) {
-            qDebug() << "Can not run database query";
+            qDebug() << "Can not run database query" << query.lastError().text();
         } else {
             QSqlRecord record = query.record();
 

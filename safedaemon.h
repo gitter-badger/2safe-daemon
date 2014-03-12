@@ -58,7 +58,7 @@ private:
     void initWatcher(const QString &path);
     void initDatabase(const QString &name);
     void createDatabase();
-    void reindexDirectory(const QString &path);
+    void indexDirectory(const QString &path);
 
     QJsonObject formSettingsReply(const QJsonArray &requestFields);
     QString getFilesystemPath();
