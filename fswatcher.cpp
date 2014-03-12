@@ -35,21 +35,26 @@ void FSWatcher::watch()
     QString moved_from;
     uint32_t cookie;
 
-    while(true) {
-        event = inotifytools_next_event( DELETE_DELAY );
+    QEventLoop loop;
+    QTimer looper;
+    looper.setInterval(DELETE_DELAY * 1000);
+    looper.setTimerType(Qt::VeryCoarseTimer);
+    connect(&looper, &QTimer::timeout, [&](){
+        event = inotifytools_next_event( 0 );
         if ( !event ) {
             if ( !inotifytools_error() ) {
-                // qDebug() << "Cycle elapsed";
+                //qDebug() << "Cycle elapsed";
                 if(!moved_from.isEmpty()) {
                     handleMovedAwayFile(moved_from);
                     moved_from.clear();
                     cookie = 0;
                 }
-                continue;
+                return;
             }
             else {
                 qWarning() << "Watching stopped by error:" <<  strerror( inotifytools_error() );
-                return;
+                looper.stop();
+                loop.exit();
             }
         }
 
@@ -65,7 +70,7 @@ void FSWatcher::watch()
         // Obvious delete
         if (event->mask & IN_DELETE) {
             emit deleted(path, (event->mask & IN_ISDIR));
-            continue;
+            return;
         }
 
         // Moved away
@@ -78,7 +83,7 @@ void FSWatcher::watch()
         // Obvious modification
         if( (event->mask & IN_CLOSE_WRITE) ) {
             emit modified(path);
-            continue;
+            return;
         }
 
         // Obvious rename
@@ -119,7 +124,9 @@ void FSWatcher::watch()
                 }
             }
         }
-    }
+    });
+    looper.start();
+    loop.exec();
 }
 
 FSWatcher::~FSWatcher()

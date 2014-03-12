@@ -7,11 +7,12 @@
 #include <QDir>
 #include <cstring>
 #include <errno.h>
-#include <assert.h>
+#include <QEventLoop>
+#include <QTimer>
 #include <inotifytools/inotify.h>
 #include <inotifytools/inotifytools.h>
 
-#define DELETE_DELAY 5 // seconds
+#define DELETE_DELAY 3 // seconds
 
 class FSWatcher : public QObject
 {
