@@ -1,8 +1,8 @@
 #ifndef SAFECOMMON_H
 #define SAFECOMMON_H
 
-#define APP_NAME "2safe"
-#define ORG_NAME "2safe"
+#define APP_NAME "2Safe"
+#define ORG_NAME "ROSA"
 #define DEFAULT_ROOT_NAME "2safe"
 #define STATE_DATABASE "2safe.db"
 #define SAFE_DIR ".2safe"

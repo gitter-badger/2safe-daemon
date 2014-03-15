@@ -38,12 +38,9 @@ class SafeDaemon : public QObject {
 
 public:
     SafeDaemon(QObject *parent = 0);
+    ~SafeDaemon();
     bool isListening();
     QString socketPath();
-
-signals:
-    void fileUploaded(const QString &path, const QString &hash, const uint &updatedAt);
-    void newFileUploaded(const QString &path, const QString &hash, const uint &updatedAt);
 
 private:
     SafeApiFactory *apiFactory;
@@ -51,9 +48,10 @@ private:
     QSettings *settings;
     FSWatcher *watcher;
     QSqlDatabase database;
-    QMap<QString, uint> *progress;
 
-    bool authenticateUser();
+    QMap<QString, SafeApi *> activeTransfers;
+    void finishTransfer(const QString& path);
+
     void bindServer(QLocalServer *server, QString path);
     void initWatcher(const QString &path);
     void initDatabase(const QString &name);
@@ -63,18 +61,17 @@ private:
     QJsonObject formSettingsReply(const QJsonArray &requestFields);
     QString getFilesystemPath();
     bool isFileAllowed(const QFileInfo &info);
-
-    bool isUploading(const QString &path);
-    void startUploading(const QString &path);
-    void updateUploadingProgress(const QString &path, uint &progress);
-    void finishUploading(const QString &path);
+    QString makeHash(const QString &path);
 
 private slots:
     void handleClientConnection();
-    void fileAdded(const QString &path);
+    void fileAdded(const QString &path, bool isDir);
     void fileModified(const QString &hash);
-    void saveFileInfo(const QString &path, const QString &hash, const uint &updatedAt);
+    void insertFileInfo(const QString &path, const QString &hash, const uint &updatedAt);
     void updateFileInfo(const QString &path, const QString &hash, const uint &updatedAt);
+
+    bool authUser();
+    void deauthUser();
 };
 
 #endif // SAFEDAEMON_H

@@ -12,7 +12,8 @@ TEMPLATE = app
 SOURCES += main.cpp \
     safedaemon.cpp \
     safeapifactory.cpp \
-    fswatcher.cpp
+    fswatcher.cpp \
+    saferpcqueue.cpp
 
 include(lib2safe/safe.pri)
 
@@ -20,6 +21,7 @@ HEADERS += \
     safedaemon.h \
     safecommon.h \
     safeapifactory.h \
-    fswatcher.h
+    fswatcher.h \
+    saferpcqueue.h
 
 LIBS = -linotifytools

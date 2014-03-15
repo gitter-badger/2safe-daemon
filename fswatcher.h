@@ -31,8 +31,13 @@ signals:
 
 private:
     void handleMovedAwayFile(QString path);
+    QEventLoop loop;
+    QTimer *looper;
     QString m_path;
-    int m_events;
+    int events;
+
+public slots:
+    void stop();
 
 };
 

@@ -10,7 +10,7 @@ int main(int argc, char *argv[]) {
     if (daemon.isListening()) {
         qDebug() << "Socket path: " << daemon.socketPath();
     } else {
-        qDebug() << "Failed to start daemon. Now go fuck yourself.";
+        qDebug() << "Failed to start daemon.";
         return -1;
     }
 

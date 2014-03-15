@@ -3,7 +3,7 @@
 FSWatcher::FSWatcher(QString path, QObject *parent) :
     QObject(parent),
     m_path(path),
-    m_events(IN_CREATE|IN_DELETE|IN_MOVE|IN_CLOSE_WRITE)
+    events(IN_CREATE|IN_DELETE|IN_MOVE|IN_CLOSE_WRITE)
 {
     if(!inotifytools_initialize()) {
         qWarning() << "Unable to initialize inotify watcher";
@@ -14,7 +14,7 @@ FSWatcher::FSWatcher(QString path, QObject *parent) :
         qWarning() << "Specified path \"" << m_path  << "\" does not exist";
     }
 
-    if(!inotifytools_watch_recursively(m_path.toStdString().c_str(), this->m_events)) {
+    if(!inotifytools_watch_recursively(m_path.toStdString().c_str(), this->events)) {
         if(inotifytools_error() == ENOSPC) {
             qWarning() << "Failed to watch \"" << m_path << "\"; upper limit on inotify watches reached!";
         } else {
@@ -35,11 +35,10 @@ void FSWatcher::watch()
     QString moved_from;
     uint32_t cookie;
 
-    QEventLoop loop;
-    QTimer looper;
-    looper.setInterval(DELETE_DELAY * 1000);
-    looper.setTimerType(Qt::VeryCoarseTimer);
-    connect(&looper, &QTimer::timeout, [&](){
+    this->looper = new QTimer(this);
+    this->looper->setInterval(DELETE_DELAY * 1000);
+    this->looper->setTimerType(Qt::VeryCoarseTimer);
+    connect(looper, &QTimer::timeout, [&](){
         event = inotifytools_next_event( 0 );
         if ( !event ) {
             if ( !inotifytools_error() ) {
@@ -53,8 +52,7 @@ void FSWatcher::watch()
             }
             else {
                 qWarning() << "Watching stopped by error:" <<  strerror( inotifytools_error() );
-                looper.stop();
-                loop.exit();
+                stop();
             }
         }
 
@@ -102,7 +100,7 @@ void FSWatcher::watch()
 
             // New file - if it is a directory, watch it
             if (event->mask & IN_ISDIR) {
-                if( !inotifytools_watch_recursively( new_file.toStdString().c_str(), this->m_events )) {
+                if( !inotifytools_watch_recursively( new_file.toStdString().c_str(), this->events )) {
                     qWarning() << "Couldn't watch new directory" << new_file
                                << ":" << strerror( inotifytools_error() );
                 }
@@ -125,8 +123,8 @@ void FSWatcher::watch()
             }
         }
     });
-    looper.start();
-    loop.exec();
+    this->looper->start();
+    this->loop.exec();
 }
 
 FSWatcher::~FSWatcher()
@@ -142,4 +140,10 @@ void FSWatcher::handleMovedAwayFile(QString path)
                    << ":" << strerror( inotifytools_error() );
     }
     emit deleted(path, path.endsWith(QDir::separator()));
+}
+
+void FSWatcher::stop()
+{
+    this->looper->stop();
+    this->loop.exit();
 }

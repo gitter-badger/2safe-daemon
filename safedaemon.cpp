@@ -11,22 +11,26 @@ SafeDaemon::SafeDaemon(QObject *parent) : QObject(parent) {
                      QDir::separator() + SAFE_DIR +
                      QDir::separator() + SOCKET_FILE);
 
-    if (this->authenticateUser()) {
-        connect(this, &SafeDaemon::newFileUploaded, this, &SafeDaemon::saveFileInfo);
-        connect(this, &SafeDaemon::fileUploaded, this, &SafeDaemon::updateFileInfo);
-
-        this->progress = new QMap<QString, uint>();
+    if (this->authUser()) {
         this->initDatabase(STATE_DATABASE);
         this->initWatcher(getFilesystemPath());
     }
 }
 
-bool SafeDaemon::authenticateUser() {
+SafeDaemon::~SafeDaemon()
+{
+    this->apiFactory->deleteLater();
+    this->watcher->deleteLater();
+    this->database.close();
+}
+
+bool SafeDaemon::authUser() {
     /* Credentials */
     QString login = this->settings->value("login", "").toString();
     QString password = this->settings->value("password", "").toString();
 
     if (login.length() < 1 || password.length() < 1) {
+        qDebug() << "Unauthorized";
         return false;
     }
 
@@ -40,17 +44,30 @@ bool SafeDaemon::authenticateUser() {
     return true;
 }
 
+void SafeDaemon::deauthUser()
+{
+    this->apiFactory->deleteLater();
+    this->watcher->deleteLater();
+    this->database.close();
+    this->settings->setValue("login", "");
+    this->settings->setValue("password", "");
+    this->apiFactory = new SafeApiFactory(API_HOST, this);
+}
+
+
 void SafeDaemon::initWatcher(const QString &path) {
     this->watcher = new FSWatcher(path, this);
 
     connect(this->watcher, &FSWatcher::added, this, &SafeDaemon::fileAdded);
     connect(this->watcher, &FSWatcher::modified, this, &SafeDaemon::fileModified);
 
+    /*
     QDirIterator iterator(path, QDir::Dirs | QDir::NoDotAndDotDot, QDirIterator::Subdirectories);
     this->indexDirectory(path);
     while (iterator.hasNext()) {
         this->indexDirectory(iterator.next());
     }
+    */
 
     this->watcher->watch();
 }
@@ -94,6 +111,11 @@ bool SafeDaemon::isListening() {
 
 QString SafeDaemon::socketPath() {
     return this->server->fullServerName();
+}
+
+void SafeDaemon::finishTransfer(const QString &path)
+{
+    activeTransfers.take(path)->deleteLater();
 }
 
 QString SafeDaemon::getFilesystemPath()
@@ -195,7 +217,7 @@ void SafeDaemon::indexDirectory(const QString &path) {
         iterator.next();
 
         QFileInfo info = iterator.fileInfo();
-        QString hash(QCryptographicHash::hash(iterator.filePath().toUtf8(), QCryptographicHash::Md5).toHex());
+        QString hash(makeHash(iterator.filePath()));
         QDateTime updatedAtFs = info.lastModified();
 
         QSqlQuery query(this->database);
@@ -212,23 +234,24 @@ void SafeDaemon::indexDirectory(const QString &path) {
                 uint updatedAtDb = query.value(record.indexOf("updated_at")).toUInt();
 
                 if (updatedAtFs.toTime_t() != updatedAtDb) {
-                    qDebug() << "File modified:" << iterator.filePath();
+                    qDebug() << "[x] File modified:" << iterator.filePath();
                     emit this->fileModified(iterator.filePath());
                 }
             } else {
-                qDebug() << "File added:" << iterator.filePath();
-                emit this->fileAdded(iterator.filePath());
+                qDebug() << "[x] File added:" << iterator.filePath();
+                emit this->fileAdded(iterator.filePath(), false); // XXX
             }
         }
     }
 }
 
-void SafeDaemon::fileAdded(const QString &path) {
+void SafeDaemon::fileAdded(const QString &path, bool isDir) {
     qDebug() << "File added: " << path;
 
     QFileInfo info(path);
-    QString hash(QCryptographicHash::hash(path.toUtf8(), QCryptographicHash::Md5).toHex());
+    QString hash(makeHash(path));
     uint updatedAt = info.lastModified().toTime_t();
+    QString fileName = info.fileName();
 
     if (!this->isFileAllowed(info)) {
         qDebug() << "Ignoring file" << path;
@@ -245,23 +268,31 @@ void SafeDaemon::fileAdded(const QString &path) {
     connect(api, &SafeApi::pushFileComplete, [=](ulong id, SafeFile fileInfo) {
         qDebug() << "New file uploaded:" << fileInfo.name;
 
-        this->newFileUploaded(path, hash, updatedAt);
+        insertFileInfo(path, hash, updatedAt);
+    });
+    connect(api, &SafeApi::errorRaised, [&](ulong id, quint16 code, QString text){
+        qWarning() << "Error:" << text << "(" << code << ")";
+        finishTransfer(path);
     });
 
-    api->pushFile("227930033757", path, info.fileName(), this->isUploading(path));
-    this->startUploading(path);
+    bool active = this->activeTransfers.contains(path);
+    if(active) {
+        finishTransfer(path);
+    }
+    this->activeTransfers.insert(path, api);
+    api->pushFile("227930033757", path, fileName, active);
 }
 
 void SafeDaemon::fileModified(const QString &path) {
     qDebug() << "File modified: " << path;
 
     QFileInfo info(path);
-    QString hash(QCryptographicHash::hash(path.toUtf8(), QCryptographicHash::Md5).toHex());
+    QString hash(makeHash(path));
     uint updatedAt = info.lastModified().toTime_t();
+    QString fileName = info.fileName();
 
     if (!this->isFileAllowed(info)) {
         qDebug() << "Ignoring file" << path;
-
         return;
     }
 
@@ -274,14 +305,22 @@ void SafeDaemon::fileModified(const QString &path) {
     connect(api, &SafeApi::pushFileComplete, [=](ulong id, SafeFile fileInfo){
         qDebug() << "File uploaded:" << fileInfo.name;
 
-        this->fileUploaded(path, hash, updatedAt);
+        updateFileInfo(path, hash, updatedAt);
+    });
+    connect(api, &SafeApi::errorRaised, [&](ulong id, quint16 code, QString text){
+        qWarning() << "Error:" << text << "(" << code << ")";
+        finishTransfer(path);
     });
 
-    api->pushFile("227930033757", path, info.fileName(), this->isUploading(path));
-    this->startUploading(path);
+    bool active = this->activeTransfers.contains(path);
+    if(active) {
+        finishTransfer(path);
+    }
+    this->activeTransfers.insert(path, api);
+    api->pushFile("227930033757", path, fileName, active);
 }
 
-void SafeDaemon::saveFileInfo(const QString &path, const QString &hash, const uint &updatedAt) {
+void SafeDaemon::insertFileInfo(const QString &path, const QString &hash, const uint &updatedAt) {
     QSqlQuery query(this->database);
     query.prepare("INSERT INTO files (hash, path, updated_at) VALUES (:hash, :path, :updated_at)");
     query.bindValue(":hash", hash);
@@ -291,8 +330,6 @@ void SafeDaemon::saveFileInfo(const QString &path, const QString &hash, const ui
     if (!query.exec()) {
         qDebug() << "Can not run database query:" << query.lastError().text();
     }
-
-    this->finishUploading(hash);
 }
 
 void SafeDaemon::updateFileInfo(const QString &path, const QString &hash, const uint &updatedAt) {
@@ -305,26 +342,14 @@ void SafeDaemon::updateFileInfo(const QString &path, const QString &hash, const 
     if (!query.exec()) {
         qDebug() << "Can not run database query:" << query.lastError().text();
     }
-
-    this->finishUploading(hash);
-}
-
-bool SafeDaemon::isUploading(const QString &path) {
-    return this->progress->contains(path);
-}
-
-void SafeDaemon::startUploading(const QString &path) {
-    this->progress->insert(path, 0);
-}
-
-void SafeDaemon::updateUploadingProgress(const QString &path, uint &progress) {
-    this->progress->insert(path, progress);
-}
-
-void SafeDaemon::finishUploading(const QString &path) {
-    this->progress->remove(path);
 }
 
 bool SafeDaemon::isFileAllowed(const QFileInfo &info) {
-    return !info.fileName().startsWith(".");
+    return !info.isHidden();
+}
+
+QString SafeDaemon::makeHash(const QString &path)
+{
+    QString hash(QCryptographicHash::hash(path.toUtf8(), QCryptographicHash::Md5).toHex());
+    return hash;
 }
