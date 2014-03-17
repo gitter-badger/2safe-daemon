@@ -19,7 +19,7 @@ SafeDaemon::SafeDaemon(QObject *parent) : QObject(parent) {
             //this->settings->setValue("init", false);
             purgeDb(LOCAL_STATE_DATABASE);
         } else {
-            lightIndex(QDir(getFilesystemPath()));
+            checkIndex(QDir(getFilesystemPath()));
         }
         this->initWatcher(getFilesystemPath());
     }
@@ -79,10 +79,10 @@ void SafeDaemon::initWatcher(const QString &path) {
     connect(this->watcher, &FSWatcher::added, this, &SafeDaemon::fileAdded);
     connect(this->watcher, &FSWatcher::modified, this, &SafeDaemon::fileModified);
     connect(this->watcher, &FSWatcher::deleted, [](QString path, bool is_dir){
-       qDebug() << "file deleted:" << path;
+        qDebug() << "file deleted:" << path;
     });
     connect(this->watcher, &FSWatcher::moved, [](QString path1, QString path2, bool is_dir){
-       qDebug() << "Moved" << path1 << "to" << path2;
+        qDebug() << "Moved" << path1 << "to" << path2;
     });
     this->watcher->watch();
 }
@@ -191,21 +191,45 @@ void SafeDaemon::handleClientConnection()
 }
 
 void SafeDaemon::fileAdded(const QString &path, bool isDir) {
-    qDebug() << "File added: " << path;
-
-    QFileInfo info(path);
-    QString hash(makeHash(path));
-    uint updatedAt = info.lastModified().toTime_t();
-    QString fileName = info.fileName();
+    QFileInfo info;
+    if(isDir) {
+        info.setFile(QDir(path).path());
+        qDebug() << "Directory created: " << info.path();
+    } else {
+        info.setFile(path);
+        qDebug() << "File added: " << info.path();
+    }
 
     if (!this->isFileAllowed(info)) {
         qDebug() << "Ignoring file" << path;
-
         return;
     }
 
-    qDebug() << "Uploading new file" << path;
+    uint mtime = info.lastModified().toTime_t();
 
+    //QString hash(makeHash(path));
+
+    if(isDir) {
+        QEventLoop loop;
+        QString dirId(getDirId(relativePath(info)));
+        qDebug() << "Uploading new directory" << path;
+
+        auto api = this->apiFactory->newApi();
+        connect(api, &SafeApi::makeDirComplete, [&](ulong id, ulong dir_id){
+            qDebug() << "Created directory" << dir_id << "in"
+                     << dirId << "(" << (relativePath(info)) << ")";
+            loop.exit();
+        });
+        connect(api, &SafeApi::errorRaised, [&](ulong id, quint16 code, QString text){
+            qWarning() << "Error making dir:" << text << "(" << code << ")";
+            loop.exit();
+        });
+
+        api->makeDir(dirId, info.fileName());
+        loop.exec();
+    }
+
+    /*
     auto api = this->apiFactory->newApi();
     connect(api, &SafeApi::pushFileProgress, [=](ulong id, ulong bytes, ulong totalBytes){
         qDebug() << "Progress:" << bytes << "/" << totalBytes;
@@ -215,7 +239,7 @@ void SafeDaemon::fileAdded(const QString &path, bool isDir) {
 
         //insertFileInfo(path, hash, updatedAt);
     });
-    connect(api, &SafeApi::errorRaised, [&](ulong id, quint16 code, QString text){
+    connect(api, &SafeApi::errorRaised, [](ulong id, quint16 code, QString text){
         qWarning() << "Error:" << text << "(" << code << ")";
         finishTransfer(path);
     });
@@ -226,6 +250,7 @@ void SafeDaemon::fileAdded(const QString &path, bool isDir) {
     }
     this->activeTransfers.insert(path, api);
     api->pushFile("227930033757", path, fileName, active);
+    */
 }
 
 void SafeDaemon::fileModified(const QString &path) {
@@ -243,6 +268,7 @@ void SafeDaemon::fileModified(const QString &path) {
 
     qDebug() << "Uploading file" << path;
 
+    /*
     auto api = this->apiFactory->newApi();
     connect(api, &SafeApi::pushFileProgress, [=](ulong id, ulong bytes, ulong totalBytes){
         qDebug() << "Progress:" << bytes << "/" << totalBytes;
@@ -252,7 +278,7 @@ void SafeDaemon::fileModified(const QString &path) {
 
         //updateFileInfo(path, hash, updatedAt);
     });
-    connect(api, &SafeApi::errorRaised, [&](ulong id, quint16 code, QString text){
+    connect(api, &SafeApi::errorRaised, [](ulong id, quint16 code, QString text){
         qWarning() << "Error:" << text << "(" << code << ")";
         finishTransfer(path);
     });
@@ -263,6 +289,17 @@ void SafeDaemon::fileModified(const QString &path) {
     }
     this->activeTransfers.insert(path, api);
     api->pushFile("227930033757", path, fileName, active);
+    */
+}
+
+void SafeDaemon::fileDeleted(const QString &path)
+{
+
+}
+
+void SafeDaemon::fileMoved(const QString &path1, const QString &path2)
+{
+
 }
 
 bool SafeDaemon::isFileAllowed(const QFileInfo &info) {
@@ -282,9 +319,16 @@ QString SafeDaemon::makeHash(const QFileInfo &info)
 
 QString SafeDaemon::makeHash(const QString &str)
 {
-    QString hash(QCryptographicHash::hash(str.toUtf8(),
-                                          QCryptographicHash::Md5).toHex());
+    QString hash(QCryptographicHash::hash(
+                     str.toUtf8(), QCryptographicHash::Md5).toHex());
     return hash;
+}
+
+QString SafeDaemon::updateDirHash(const QDir &dir)
+{
+    qDebug() << "PATH:::" << dir.absolutePath();
+    this->localStateDb->updateDirHash(relativeFilePath(
+                                          QFileInfo(dir.absolutePath())));
 }
 
 uint SafeDaemon::getMtime(const QFileInfo &info)
@@ -292,8 +336,8 @@ uint SafeDaemon::getMtime(const QFileInfo &info)
     return info.lastModified().toTime_t();
 }
 
-// Seems that I supposed to know some O-effective algorithms,
-// tress, rbtrees, other things,
+// Seems that I'm supposed to know some O-effective algorithms,
+// trees, rbtrees, other things,
 // but I only know loops and ifs
 // LOL
 void SafeDaemon::fullIndex(const QDir &dir)
@@ -301,7 +345,12 @@ void SafeDaemon::fullIndex(const QDir &dir)
     qDebug() << "Doing full index";
     QMap<QString, QPair<QString, uint> > dir_index;
     QDirIterator iterator(dir.absolutePath(), QDirIterator::Subdirectories);
-    uint overall;
+    struct s {
+        uint space = 0;
+        uint files = 0;
+        uint dirs = 0;
+    } stats;
+
     if (!this->localStateDb->open())
         return;
     while (iterator.hasNext()) {
@@ -314,7 +363,7 @@ void SafeDaemon::fullIndex(const QDir &dir)
             continue;
         }
         if (!info.isDir()) {
-            overall += info.size();
+            stats.space += info.size();
             auto hash = makeHash(info);
             auto mtime = getMtime(info);
             auto dir = info.absolutePath();
@@ -323,11 +372,10 @@ void SafeDaemon::fullIndex(const QDir &dir)
                         relativeFilePath(info),
                         info.fileName(),
                         hash, mtime);
-            qDebug() << "file:" << relativePath(info)
-                     << relativeFilePath(info)
-                     << info.fileName();
 
             if(!dir_index.contains(dir)){
+                // index file
+                stats.files++;
                 dir_index.insert(dir, QPair<QString, uint>(
                                      hash, mtime));
                 continue;
@@ -337,63 +385,134 @@ void SafeDaemon::fullIndex(const QDir &dir)
                 dir_index[dir].second = mtime;
             }
         } else if (QDir(info.filePath()).count() < 3) {
-            // empty dir
+            // index empty dir
+            stats.dirs++;
             localStateDb->insertDir(QString(), relativeFilePath(info),
                                     info.dir().dirName(), QString(),
                                     getMtime(info));
         }
     }
-    qDebug() << "GBs:" << overall / (1024.0 * 1024.0 * 1024.0);
 
     foreach(auto k, dir_index.keys()) {
         QString relative = relativeFilePath(k);
         if(relative.isEmpty()) {
             continue;
         }
+        // index dir
+        stats.dirs++;
         localStateDb->insertDir(QString(), relative, QDir(k).dirName(),
                                 makeHash(dir_index[k].first), dir_index[k].second);
-        qDebug() << "dir:" << relativeFilePath(k), makeHash(dir_index[k].first), dir_index[k].second;
     }
     this->localStateDb->close();
+    qDebug() << "GBs:" << stats.space / (1024.0 * 1024.0 * 1024.0)
+             << "\nFiles:" << stats.files <<
+                "\nDirs:" << stats.dirs;
 }
 
-QMap<QString, uint> SafeDaemon::lightIndex(const QDir &dir)
+void SafeDaemon::checkIndex(const QDir &dir)
 {
-    qDebug() << "Doing light reindex";
-    QMap<QString, uint> index;
-    QMap<QString, uint> dir_index;
+    /*
+    qDebug() << "Doing full index";
+    QMap<QString, QPair<QString, uint> > dir_index;
     QDirIterator iterator(dir.absolutePath(), QDirIterator::Subdirectories);
-    iterator.next(); // skip root
-    uint overall;
+    struct s {
+        uint space = 0;
+        uint files = 0;
+        uint dirs = 0;
+    } stats;
+
+    if (!this->localStateDb->open())
+        return;
     while (iterator.hasNext()) {
         iterator.next();
+        if(iterator.fileName() == "." || iterator.fileName() == "..") {
+            continue;
+        }
         auto info = iterator.fileInfo();
+        if(info.isSymLink()) {
+            continue;
+        }
         if (!info.isDir()) {
-            overall += info.size();
+            stats.space += info.size();
+            auto hash = makeHash(info);
             auto mtime = getMtime(info);
-            auto dir = info.dir().path();
-            index.insert(info.filePath(), mtime);
+            auto dir = info.absolutePath();
+            this->localStateDb->insertFile(
+                        relativePath(info),
+                        relativeFilePath(info),
+                        info.fileName(),
+                        hash, mtime);
+
             if(!dir_index.contains(dir)){
-                dir_index.insert(dir, mtime);
+                // index file
+                stats.files++;
+                dir_index.insert(dir, QPair<QString, uint>(
+                                     hash, mtime));
                 continue;
             }
-            if(mtime > dir_index[dir]) {
-                dir_index[dir] = mtime;
+            dir_index[dir].first.append(hash);
+            if(mtime > dir_index[dir].second) {
+                dir_index[dir].second = mtime;
             }
+        } else if (QDir(info.filePath()).count() < 3) {
+            // index empty dir
+            stats.dirs++;
+            localStateDb->insertDir(QString(), relativeFilePath(info),
+                                    info.dir().dirName(), QString(),
+                                    getMtime(info));
         }
     }
-    qDebug() << "GBs:" << overall / (1024.0 * 1024.0 * 1024.0);
 
-    index.unite(dir_index);
-    qDebug() << "OVERALL:" << index.count() << "FILES";
+    foreach(auto k, dir_index.keys()) {
+        QString relative = relativeFilePath(k);
+        if(relative.isEmpty()) {
+            continue;
+        }
+        // index dir
+        stats.dirs++;
+        localStateDb->insertDir(QString(), relative, QDir(k).dirName(),
+                                makeHash(dir_index[k].first), dir_index[k].second);
+    }
+    this->localStateDb->close();
+    qDebug() << "GBs:" << stats.space / (1024.0 * 1024.0 * 1024.0)
+             << "\nFiles:" << stats.files <<
+                "\nDirs:" << stats.dirs;
+                */
 }
 
 QString SafeDaemon::relativeFilePath(const QFileInfo &info)
 {
-    return QDir(getFilesystemPath()).relativeFilePath(info.filePath());
+    QString relative = QDir(getFilesystemPath()).relativeFilePath(info.filePath());
+    return relative.isEmpty() ? "/" : relative;
+}
+
+QString SafeDaemon::getDirId(const QString &path)
+{
+    QString dirId;
+    QEventLoop loop;
+    auto api = this->apiFactory->newApi();
+    connect(api, &SafeApi::getPropsComplete, [&](ulong id, QJsonObject props){
+        auto info = props.value("object").toObject();
+        dirId = SafeDir(info).id;
+        loop.exit();
+    });
+    connect(api, &SafeApi::errorRaised, [&](ulong id, quint16 code, QString text){
+        qWarning() << "Error getting props:" << text << "(" << code << ")";
+        loop.exit();
+    });
+
+    api->getProps(path, true);
+    loop.exec();
+    return dirId;
 }
 
 QString SafeDaemon::relativePath(const QFileInfo &info)
 {
-    return QDir(getFilesystemPath()).relativeFilePath(info.path());
+    QString relative;
+    if(info.isDir()) {
+        relative = QDir(getFilesystemPath()).relativeFilePath(info.dir().path());
+    } else {
+        relative = QDir(getFilesystemPath()).relativeFilePath(info.path());
+    }
+    return relative.isEmpty() ? "/" : relative;
 }

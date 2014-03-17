@@ -24,6 +24,7 @@ SafeStateDb::SafeStateDb(QString name, QObject *parent) :
     QString q("CREATE TABLE IF NOT EXISTS files ");
     q.append("(");
     q.append("_id INTEGER PRIMARY KEY,");
+    q.append("dir TEXT,");
     q.append("path TEXT,");
     q.append("name VARCHAR(255),");
     q.append("hash VARCHAR(32),");
@@ -115,6 +116,30 @@ bool SafeStateDb::existsDir(QString path)
         return true;
     }
     return false;
+}
+
+void SafeStateDb::updateDirHash(QString dir)
+{
+    if(!open())
+        return;
+    QSqlQuery query(this->database);
+    query.prepare("SELECT hash FROM files WHERE dir=:dir");
+    query.bindValue(":dir", dir);
+    query.exec();
+    QString hashstr;
+    while(query.next()) {
+        hashstr += query.value(0).toString();
+    }
+    QString hash(QCryptographicHash::hash(
+                     hashstr.toUtf8(), QCryptographicHash::Md5).toHex());
+    qDebug() << "Collected hash:" << hashstr;
+    qDebug() << "Overall hash:" << hash;
+    query.clear();
+    query.prepare("UPDATE dirs SET hash=:hash WHERE path=:path");
+    query.bindValue(":hash", hash);
+    query.bindValue(":path", dir);
+    query.exec();
+    close();
 }
 
 QString SafeStateDb::findFile(QString hash)

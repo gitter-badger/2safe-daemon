@@ -12,8 +12,6 @@
 #include <inotifytools/inotify.h>
 #include <inotifytools/inotifytools.h>
 
-#define DELETE_DELAY 3 // seconds
-
 class FSWatcher : public QObject
 {
     Q_OBJECT

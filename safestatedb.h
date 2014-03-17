@@ -7,6 +7,7 @@
 #include <QStandardPaths>
 #include <QDir>
 #include <QDebug>
+#include <QCryptographicHash>
 
 class SafeStateDb : public QObject
 {
@@ -20,8 +21,9 @@ public:
     bool existsFile(QString path);
     bool existsDir(QString path);
     QString findFile(QString hash);
-    bool open();
+    void updateDirHash(QString dir);
 
+    bool open();
     static QString formPath(QString name);
 
 signals:

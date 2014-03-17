@@ -23,6 +23,7 @@
 #include <QDateTime>
 #include <QCryptographicHash>
 #include <QMap>
+#include <QEventLoop>
 #include <lib2safe/safeapi.h>
 
 #include "safeapifactory.h"
@@ -59,16 +60,35 @@ private:
     bool isFileAllowed(const QFileInfo &info);
     QString makeHash(const QFileInfo &info);
     QString makeHash(const QString &str);
+    QString updateDirHash(const QDir &dir);
     uint getMtime(const QFileInfo &info);
     void fullIndex(const QDir &dir); // hash + mtime
-    QMap<QString, uint> lightIndex(const QDir &dir); // mtime
+    void checkIndex(const QDir &dir); // mtime
     QString relativePath(const QFileInfo &info);
     QString relativeFilePath(const QFileInfo &info);
+    QString getDirId(const QString &path);
 
 private slots:
     void handleClientConnection();
+
+    // FS handlers
     void fileAdded(const QString &path, bool isDir);
-    void fileModified(const QString &hash);
+    void fileModified(const QString &path);
+    void fileDeleted(const QString &path);
+    void fileMoved(const QString &path1, const QString &path2);
+    void fileCopied(const QString &path1, const QString &path2);
+
+    // TODO: file actions queues
+
+    /* WIP
+    void createDir();
+    void removeDir();
+    void uploadFile();
+    void downloadFile;
+    void removeFile();
+    void copyFile();
+    void moveFile();
+    */
 
     bool authUser();
     void deauthUser();
