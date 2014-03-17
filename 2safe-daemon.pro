@@ -13,7 +13,8 @@ SOURCES += main.cpp \
     safedaemon.cpp \
     safeapifactory.cpp \
     fswatcher.cpp \
-    saferpcqueue.cpp
+    saferpcqueue.cpp \
+    safestatedb.cpp
 
 include(lib2safe/safe.pri)
 
@@ -22,6 +23,7 @@ HEADERS += \
     safecommon.h \
     safeapifactory.h \
     fswatcher.h \
-    saferpcqueue.h
+    saferpcqueue.h \
+    safestatedb.h
 
 LIBS = -linotifytools

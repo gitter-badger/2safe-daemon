@@ -12,7 +12,15 @@ SafeDaemon::SafeDaemon(QObject *parent) : QObject(parent) {
                      QDir::separator() + SOCKET_FILE);
 
     if (this->authUser()) {
-        this->initDatabase(STATE_DATABASE);
+        this->localStateDb = new SafeStateDb(LOCAL_STATE_DATABASE);
+        this->remoteStateDb = new SafeStateDb(REMOTE_STATE_DATABASE);
+        if(this->settings->value("init", true).toBool()) {
+            fullIndex(QDir(getFilesystemPath()));
+            //this->settings->setValue("init", false);
+            purgeDb(LOCAL_STATE_DATABASE);
+        } else {
+            lightIndex(QDir(getFilesystemPath()));
+        }
         this->initWatcher(getFilesystemPath());
     }
 }
@@ -21,7 +29,10 @@ SafeDaemon::~SafeDaemon()
 {
     this->apiFactory->deleteLater();
     this->watcher->deleteLater();
-    this->database.close();
+    this->localStateDb->close();
+    this->remoteStateDb->close();
+    this->localStateDb->deleteLater();
+    this->remoteStateDb->deleteLater();
 }
 
 bool SafeDaemon::authUser() {
@@ -32,12 +43,8 @@ bool SafeDaemon::authUser() {
     if (login.length() < 1 || password.length() < 1) {
         qDebug() << "Unauthorized";
         return false;
-    }
-
-    /* Authentication & FS initialization */
-    if(!this->apiFactory->authUser(login, password)) {
+    } else if(!this->apiFactory->authUser(login, password)) {
         qWarning() << "Authentication failed";
-
         return false;
     }
 
@@ -48,61 +55,36 @@ void SafeDaemon::deauthUser()
 {
     this->apiFactory->deleteLater();
     this->watcher->deleteLater();
-    this->database.close();
+    this->localStateDb->close();
+    this->remoteStateDb->close();
+    this->localStateDb->deleteLater();
+    this->remoteStateDb->deleteLater();
     this->settings->setValue("login", "");
     this->settings->setValue("password", "");
+    this->settings->setValue("init", true);
+
     this->apiFactory = new SafeApiFactory(API_HOST, this);
+    purgeDb(LOCAL_STATE_DATABASE);
+    purgeDb(REMOTE_STATE_DATABASE);
 }
 
+void SafeDaemon::purgeDb(const QString &name)
+{
+    QString path = SafeStateDb::formPath(name);
+    QFile(path).remove();
+}
 
 void SafeDaemon::initWatcher(const QString &path) {
     this->watcher = new FSWatcher(path, this);
-
     connect(this->watcher, &FSWatcher::added, this, &SafeDaemon::fileAdded);
     connect(this->watcher, &FSWatcher::modified, this, &SafeDaemon::fileModified);
-
-    /*
-    QDirIterator iterator(path, QDir::Dirs | QDir::NoDotAndDotDot, QDirIterator::Subdirectories);
-    this->indexDirectory(path);
-    while (iterator.hasNext()) {
-        this->indexDirectory(iterator.next());
-    }
-    */
-
+    connect(this->watcher, &FSWatcher::deleted, [](QString path, bool is_dir){
+       qDebug() << "file deleted:" << path;
+    });
+    connect(this->watcher, &FSWatcher::moved, [](QString path1, QString path2, bool is_dir){
+       qDebug() << "Moved" << path1 << "to" << path2;
+    });
     this->watcher->watch();
-}
-
-void SafeDaemon::initDatabase(const QString &name) {
-    QString databaseDirectory = QStandardPaths::writableLocation(QStandardPaths::DataLocation);
-
-    if (databaseDirectory.isEmpty()) {
-        qDebug() << "Can not find database location";
-    } else {
-        if (!QDir(databaseDirectory).exists()) {
-            QDir().mkpath(databaseDirectory);
-        }
-
-        QString databasePath = QDir(databaseDirectory).filePath(name);
-        qDebug() << "Using database path:" << databasePath;
-
-        this->database = QSqlDatabase::addDatabase("QSQLITE");
-        this->database.setDatabaseName(databasePath);
-
-        if (this->database.open()) {
-            this->createDatabase();
-        } else {
-            qDebug() << "Can not open database";
-        }
-    }
-}
-
-void SafeDaemon::createDatabase() {
-    QSqlQuery query(this->database);
-    query.prepare("CREATE TABLE IF NOT EXISTS files (hash VARCHAR(32) PRIMARY KEY, path TEXT, updated_at INTEGER)");
-
-    if (!query.exec()) {
-        qDebug() << "Can not run database query";
-    }
 }
 
 bool SafeDaemon::isListening() {
@@ -208,43 +190,6 @@ void SafeDaemon::handleClientConnection()
     socket->close();
 }
 
-void SafeDaemon::indexDirectory(const QString &path) {
-    qDebug() << "Indexing" << path;
-
-    QDirIterator iterator(path, QDir::Files);
-
-    while (iterator.hasNext()) {
-        iterator.next();
-
-        QFileInfo info = iterator.fileInfo();
-        QString hash(makeHash(iterator.filePath()));
-        QDateTime updatedAtFs = info.lastModified();
-
-        QSqlQuery query(this->database);
-        // Why the fuck bindValue does not work?
-        query.prepare("SELECT * FROM files WHERE hash = :hash");
-        query.bindValue(":hash", hash);
-
-        if (!query.exec()) {
-            qDebug() << "Can not run database query" << query.lastError().text();
-        } else {
-            QSqlRecord record = query.record();
-
-            if (query.next()) {
-                uint updatedAtDb = query.value(record.indexOf("updated_at")).toUInt();
-
-                if (updatedAtFs.toTime_t() != updatedAtDb) {
-                    qDebug() << "[x] File modified:" << iterator.filePath();
-                    emit this->fileModified(iterator.filePath());
-                }
-            } else {
-                qDebug() << "[x] File added:" << iterator.filePath();
-                emit this->fileAdded(iterator.filePath(), false); // XXX
-            }
-        }
-    }
-}
-
 void SafeDaemon::fileAdded(const QString &path, bool isDir) {
     qDebug() << "File added: " << path;
 
@@ -268,7 +213,7 @@ void SafeDaemon::fileAdded(const QString &path, bool isDir) {
     connect(api, &SafeApi::pushFileComplete, [=](ulong id, SafeFile fileInfo) {
         qDebug() << "New file uploaded:" << fileInfo.name;
 
-        insertFileInfo(path, hash, updatedAt);
+        //insertFileInfo(path, hash, updatedAt);
     });
     connect(api, &SafeApi::errorRaised, [&](ulong id, quint16 code, QString text){
         qWarning() << "Error:" << text << "(" << code << ")";
@@ -305,7 +250,7 @@ void SafeDaemon::fileModified(const QString &path) {
     connect(api, &SafeApi::pushFileComplete, [=](ulong id, SafeFile fileInfo){
         qDebug() << "File uploaded:" << fileInfo.name;
 
-        updateFileInfo(path, hash, updatedAt);
+        //updateFileInfo(path, hash, updatedAt);
     });
     connect(api, &SafeApi::errorRaised, [&](ulong id, quint16 code, QString text){
         qWarning() << "Error:" << text << "(" << code << ")";
@@ -320,36 +265,135 @@ void SafeDaemon::fileModified(const QString &path) {
     api->pushFile("227930033757", path, fileName, active);
 }
 
-void SafeDaemon::insertFileInfo(const QString &path, const QString &hash, const uint &updatedAt) {
-    QSqlQuery query(this->database);
-    query.prepare("INSERT INTO files (hash, path, updated_at) VALUES (:hash, :path, :updated_at)");
-    query.bindValue(":hash", hash);
-    query.bindValue(":path", path);
-    query.bindValue(":updated_at", updatedAt);
-
-    if (!query.exec()) {
-        qDebug() << "Can not run database query:" << query.lastError().text();
-    }
-}
-
-void SafeDaemon::updateFileInfo(const QString &path, const QString &hash, const uint &updatedAt) {
-    QSqlQuery query(this->database);
-    query.prepare("UPDATE files SET path = :path, updated_at = :updated_at WHERE hash = :hash");
-    query.bindValue(":hash", hash);
-    query.bindValue(":path", path);
-    query.bindValue(":updated_at", updatedAt);
-
-    if (!query.exec()) {
-        qDebug() << "Can not run database query:" << query.lastError().text();
-    }
-}
-
 bool SafeDaemon::isFileAllowed(const QFileInfo &info) {
     return !info.isHidden();
 }
 
-QString SafeDaemon::makeHash(const QString &path)
+QString SafeDaemon::makeHash(const QFileInfo &info)
 {
-    QString hash(QCryptographicHash::hash(path.toUtf8(), QCryptographicHash::Md5).toHex());
+    QFile file(info.filePath());
+    if(!file.open(QFile::ReadOnly)) {
+        return QString();
+    }
+    QCryptographicHash hash(QCryptographicHash::Md5);
+    hash.addData(&file);
+    return hash.result().toHex();
+}
+
+QString SafeDaemon::makeHash(const QString &str)
+{
+    QString hash(QCryptographicHash::hash(str.toUtf8(),
+                                          QCryptographicHash::Md5).toHex());
     return hash;
+}
+
+uint SafeDaemon::getMtime(const QFileInfo &info)
+{
+    return info.lastModified().toTime_t();
+}
+
+// Seems that I supposed to know some O-effective algorithms,
+// tress, rbtrees, other things,
+// but I only know loops and ifs
+// LOL
+void SafeDaemon::fullIndex(const QDir &dir)
+{
+    qDebug() << "Doing full index";
+    QMap<QString, QPair<QString, uint> > dir_index;
+    QDirIterator iterator(dir.absolutePath(), QDirIterator::Subdirectories);
+    uint overall;
+    if (!this->localStateDb->open())
+        return;
+    while (iterator.hasNext()) {
+        iterator.next();
+        if(iterator.fileName() == "." || iterator.fileName() == "..") {
+            continue;
+        }
+        auto info = iterator.fileInfo();
+        if(info.isSymLink()) {
+            continue;
+        }
+        if (!info.isDir()) {
+            overall += info.size();
+            auto hash = makeHash(info);
+            auto mtime = getMtime(info);
+            auto dir = info.absolutePath();
+            this->localStateDb->insertFile(
+                        relativePath(info),
+                        relativeFilePath(info),
+                        info.fileName(),
+                        hash, mtime);
+            qDebug() << "file:" << relativePath(info)
+                     << relativeFilePath(info)
+                     << info.fileName();
+
+            if(!dir_index.contains(dir)){
+                dir_index.insert(dir, QPair<QString, uint>(
+                                     hash, mtime));
+                continue;
+            }
+            dir_index[dir].first.append(hash);
+            if(mtime > dir_index[dir].second) {
+                dir_index[dir].second = mtime;
+            }
+        } else if (QDir(info.filePath()).count() < 3) {
+            // empty dir
+            localStateDb->insertDir(QString(), relativeFilePath(info),
+                                    info.dir().dirName(), QString(),
+                                    getMtime(info));
+        }
+    }
+    qDebug() << "GBs:" << overall / (1024.0 * 1024.0 * 1024.0);
+
+    foreach(auto k, dir_index.keys()) {
+        QString relative = relativeFilePath(k);
+        if(relative.isEmpty()) {
+            continue;
+        }
+        localStateDb->insertDir(QString(), relative, QDir(k).dirName(),
+                                makeHash(dir_index[k].first), dir_index[k].second);
+        qDebug() << "dir:" << relativeFilePath(k), makeHash(dir_index[k].first), dir_index[k].second;
+    }
+    this->localStateDb->close();
+}
+
+QMap<QString, uint> SafeDaemon::lightIndex(const QDir &dir)
+{
+    qDebug() << "Doing light reindex";
+    QMap<QString, uint> index;
+    QMap<QString, uint> dir_index;
+    QDirIterator iterator(dir.absolutePath(), QDirIterator::Subdirectories);
+    iterator.next(); // skip root
+    uint overall;
+    while (iterator.hasNext()) {
+        iterator.next();
+        auto info = iterator.fileInfo();
+        if (!info.isDir()) {
+            overall += info.size();
+            auto mtime = getMtime(info);
+            auto dir = info.dir().path();
+            index.insert(info.filePath(), mtime);
+            if(!dir_index.contains(dir)){
+                dir_index.insert(dir, mtime);
+                continue;
+            }
+            if(mtime > dir_index[dir]) {
+                dir_index[dir] = mtime;
+            }
+        }
+    }
+    qDebug() << "GBs:" << overall / (1024.0 * 1024.0 * 1024.0);
+
+    index.unite(dir_index);
+    qDebug() << "OVERALL:" << index.count() << "FILES";
+}
+
+QString SafeDaemon::relativeFilePath(const QFileInfo &info)
+{
+    return QDir(getFilesystemPath()).relativeFilePath(info.filePath());
+}
+
+QString SafeDaemon::relativePath(const QFileInfo &info)
+{
+    return QDir(getFilesystemPath()).relativeFilePath(info.path());
 }

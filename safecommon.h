@@ -4,7 +4,8 @@
 #define APP_NAME "2Safe"
 #define ORG_NAME "ROSA"
 #define DEFAULT_ROOT_NAME "2safe"
-#define STATE_DATABASE "2safe.db"
+#define LOCAL_STATE_DATABASE "local.db"
+#define REMOTE_STATE_DATABASE "remote.db"
 #define SAFE_DIR ".2safe"
 #define SOCKET_FILE "control.sock"
 #define TOKEN_LIFESPAN 24 * 60 * 60 // 24 hours
