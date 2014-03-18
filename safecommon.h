@@ -17,4 +17,12 @@
 #define API_CALL "api_call"
 #define NOOP "noop"
 
+#define DIR_CREATED_EVENT "dir_created"
+#define DIR_MOVED_EVENT "dir_moved"
+#define FILE_MOVED_EVENT "file_moved"
+#define FILE_UPLOADED_EVENT "file_uploaded"
+
+// cheating
+#define TRASH_ID "227931033757"
+
 #endif // SAFECOMMON_H

@@ -20,7 +20,7 @@ SafeStateDb::SafeStateDb(QString name, QObject *parent) :
     this->database.setDatabaseName(dbPath);
 
     if (!this->database.open()) {
-        qWarning() << "Can not open database";
+        qWarning() << "Could not open database";
         return;
     }
 
@@ -66,7 +66,7 @@ void SafeStateDb::insertDir(QString path, QString name, ulong mtime,
     query.bindValue(":path", path);
     query.bindValue(":name", name);
     query.bindValue(":hash", hash);
-    query.bindValue(":mtime", qint64(mtime));
+    query.bindValue(":mtime", quint64(mtime));
     query.exec();
 }
 
@@ -84,7 +84,7 @@ void SafeStateDb::insertFile(QString dir, QString path, QString name, ulong mtim
     query.bindValue(":path", path);
     query.bindValue(":name", name);
     query.bindValue(":hash", hash);
-    query.bindValue(":mtime", qint64(mtime));
+    query.bindValue(":mtime", quint64(mtime));
     query.exec();
 }
 
@@ -109,9 +109,12 @@ bool SafeStateDb::existsFile(QString path)
     QSqlQuery query(this->database);
     query.prepare("SELECT count(*) FROM files WHERE path=:path");
     query.bindValue(":path", path);
-    query.exec();
-    if(query.value(0).toInt() > 0) {
-        return true;
+
+    if (query.exec()) {
+        query.next();
+        if(query.value(0).toInt() > 0) {
+            return true;
+        }
     }
     return false;
 }
@@ -121,9 +124,9 @@ bool SafeStateDb::existsDir(QString path)
     QSqlQuery query(this->database);
     query.prepare("SELECT count(*) FROM dirs WHERE path=:path");
     query.bindValue(":path", path);
-    query.exec();
-    if(query.value(0).toInt() > 0) {
-        return true;
+    if (query.exec() && query.next()) {
+        if(query.value(0).toInt() > 0)
+            return true;
     }
     return false;
 }
@@ -156,13 +159,40 @@ void SafeStateDb::updateDirId(QString dir, QString dirId)
     query.exec();
 }
 
+QString SafeStateDb::getDirId(QString path)
+{
+    QSqlQuery query(this->database);
+    query.prepare("SELECT id FROM dirs WHERE path=:path");
+    query.bindValue(":path", path);
+    if (query.exec() && query.next()) {
+        return query.value(0).toString();
+    }
+
+    return "";
+}
+
+QString SafeStateDb::getPathById(QString id)
+{
+    QSqlQuery query(this->database);
+    query.prepare("SELECT path FROM dirs WHERE id=:id");
+    query.bindValue(":id", id);
+    if (query.exec() && query.next()) {
+        return query.value(0).toString();
+    }
+
+    return "";
+}
+
 QString SafeStateDb::findFile(QString hash)
 {
     QSqlQuery query(this->database);
     query.prepare("SELECT path FROM files WHERE hash=:hash");
     query.bindValue(":hash", hash);
-    query.exec();
-    return query.value(0).toString();
+    if (query.exec() && query.next()) {
+        return query.value(0).toString();
+    }
+
+    return "";
 }
 
 void SafeStateDb::query(const QString &str)

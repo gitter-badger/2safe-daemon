@@ -12,18 +12,38 @@ SafeDaemon::SafeDaemon(QObject *parent) : QObject(parent) {
                      QDir::separator() + SOCKET_FILE);
 
     if (this->authUser()) {
+        // debug clean dbs
+        purgeDb(LOCAL_STATE_DATABASE);
+        purgeDb(REMOTE_STATE_DATABASE);
+        // open dbs
         this->localStateDb = new SafeStateDb(LOCAL_STATE_DATABASE);
         this->remoteStateDb = new SafeStateDb(REMOTE_STATE_DATABASE);
-
+        // index all remote files
         fullRemoteIndex();
+        // setup watcher (to track remote events from now)
+        this->settings->setValue("last_updated", (quint32)QDateTime::currentDateTime().toTime_t());
+        this->swatcher = new SafeWatcher((ulong)this->settings->value("last_updated").toDouble(),
+                                         this->apiFactory, this);
+        connect(this->swatcher, &SafeWatcher::timestampChanged, [&](ulong ts){
+            this->settings->setValue("last_updated", (quint32)ts);
+        });
+        connect(this->swatcher, &SafeWatcher::fileAdded, this, &SafeDaemon::remoteFileAdded);
+        connect(this->swatcher, &SafeWatcher::fileDeleted, this, &SafeDaemon::remoteFileDeleted);
+        connect(this->swatcher, &SafeWatcher::fileMoved, this, &SafeDaemon::remoteFileMoved);
+        connect(this->swatcher, &SafeWatcher::directoryCreated, this, &SafeDaemon::remoteDirectoryCreated);
+        connect(this->swatcher, &SafeWatcher::directoryDeleted, this, &SafeDaemon::remoteDirectoryDeleted);
+        connect(this->swatcher, &SafeWatcher::directoryMoved, this, &SafeDaemon::remoteDirectoryMoved);
 
+        // local index
         if(this->settings->value("init", true).toBool()) {
-            purgeDb(LOCAL_STATE_DATABASE);
             fullIndex(QDir(getFilesystemPath()));
             //this->settings->setValue("init", false);
         } else {
             checkIndex(QDir(getFilesystemPath()));
         }
+        // start watching for remote events
+        this->swatcher->watch();
+        // start watching for fs events
         this->initWatcher(getFilesystemPath());
     }
 }
@@ -32,12 +52,12 @@ SafeDaemon::~SafeDaemon()
 {
     this->apiFactory->deleteLater();
     this->watcher->deleteLater();
+    this->swatcher->deleteLater();
     this->localStateDb->deleteLater();
     this->remoteStateDb->deleteLater();
 }
 
 bool SafeDaemon::authUser() {
-    /* Credentials */
     QString login = this->settings->value("login", "").toString();
     QString password = this->settings->value("password", "").toString();
 
@@ -188,6 +208,46 @@ void SafeDaemon::handleClientConnection()
     socket->close();
 }
 
+SafeFile SafeDaemon::fetchFileInfo(const QString &id)
+{
+    SafeFile file;
+    QEventLoop loop;
+    auto api = this->apiFactory->newApi();
+    connect(api, &SafeApi::getPropsComplete, [&](ulong id, QJsonObject props){
+        auto info = props.value("object").toObject();
+        file.fromJsonObject(info);
+        loop.exit();
+    });
+    connect(api, &SafeApi::errorRaised, [&](ulong id, quint16 code, QString text){
+        qWarning() << "Error fetching info:" << text << "(" << code << ")";
+        loop.exit();
+    });
+
+    api->getProps(id);
+    loop.exec();
+    return file;
+}
+
+SafeDir SafeDaemon::fetchDirInfo(const QString &id)
+{
+    SafeDir dir;
+    QEventLoop loop;
+    auto api = this->apiFactory->newApi();
+    connect(api, &SafeApi::getPropsComplete, [&](ulong id, QJsonObject props){
+        auto info = props.value("object").toObject();
+        dir.fromJsonObject(info);
+        loop.exit();
+    });
+    connect(api, &SafeApi::errorRaised, [&](ulong id, quint16 code, QString text){
+        qWarning() << "Error fetching info:" << text << "(" << code << ")";
+        loop.exit();
+    });
+
+    api->getProps(id);
+    loop.exec();
+    return dir;
+}
+
 void SafeDaemon::fileAdded(const QString &path, bool isDir) {
     QFileInfo info;
     if (!this->isFileAllowed(info)) {
@@ -204,7 +264,7 @@ void SafeDaemon::fileAdded(const QString &path, bool isDir) {
     }
 
     if(isDir) {
-        QString dirId = createDir(getDirId(relativePath(info)), info.filePath());
+        QString dirId = createDir(fetchDirId(relativePath(info)), info.filePath());
         //this->localStateDb->updateDirId(relativePath(info), dirId);
         this->localStateDb->removeDir(relativeFilePath(info));
         this->localStateDb->insertDir(relativeFilePath(info),
@@ -213,7 +273,7 @@ void SafeDaemon::fileAdded(const QString &path, bool isDir) {
         return;
     }
 
-    queueUploadFile(getDirId(relativePath(info)), info);
+    queueUploadFile(fetchDirId(relativePath(info)), info);
     this->localStateDb->insertFile(relativePath(info), relativeFilePath(info),
                                    info.fileName(), getMtime(info), makeHash(info));
     this->localStateDb->updateDirHash(relativePath(info));
@@ -228,7 +288,7 @@ void SafeDaemon::fileModified(const QString &path) {
         qDebug() << "File modified: " << info.filePath();
     }
 
-    queueUploadFile(getDirId(relativePath(info)), info);
+    queueUploadFile(fetchDirId(relativePath(info)), info);
     this->localStateDb->removeFile(relativeFilePath(info));
     this->localStateDb->insertFile(relativePath(info), relativeFilePath(info),
                                    info.fileName(), getMtime(info), makeHash(info));
@@ -271,6 +331,42 @@ void SafeDaemon::fileMoved(const QString &path1, const QString &path2)
 void SafeDaemon::fileCopied(const QString &path1, const QString &path2)
 {
 
+}
+
+void SafeDaemon::remoteFileAdded(QString id)
+{
+    SafeFile file = fetchFileInfo(id);
+    qDebug() << "[REMOTE] file added:" << file.tree;
+}
+
+void SafeDaemon::remoteFileDeleted(QString id)
+{
+    qDebug() << "[REMOTE] file deleted:" << id;
+}
+
+void SafeDaemon::remoteDirectoryCreated(QString id)
+{
+    SafeDir dir = fetchDirInfo(id);
+    qDebug() << "[REMOTE] directory created:" << dir.tree;
+}
+
+void SafeDaemon::remoteDirectoryDeleted(QString id)
+{
+    qDebug() << "[REMOTE] directory deleted:" << id;
+}
+
+void SafeDaemon::remoteFileMoved(QString id, QString pid1, QString n1, QString pid2, QString n2)
+{
+    SafeDir dir1 = fetchDirInfo(pid1);
+    SafeDir dir2 = fetchDirInfo(pid2);
+    qDebug() << "[REMOTE] file moved:" << dir1.tree+n1 << "to" << dir2.tree+n2;
+}
+
+void SafeDaemon::remoteDirectoryMoved(QString id, QString pid1, QString n1, QString pid2, QString n2)
+{
+    SafeDir dir1 = fetchDirInfo(pid1);
+    SafeDir dir2 = fetchDirInfo(pid2);
+    qDebug() << "[REMOTE] directory moved:" << dir1.tree+n1 << "to" << dir2.tree+n2;
 }
 
 QString SafeDaemon::createDir(const QString &parent_id, const QString &path)
@@ -323,24 +419,10 @@ void SafeDaemon::queueUploadFile(const QString &dir_id, const QFileInfo &info)
     timer->setSingleShot(true);
     timer->setTimerType(Qt::VeryCoarseTimer);
 
-    auto api = this->apiFactory->newApi();
-    connect(api, &SafeApi::pushFileProgress, [&](ulong id, ulong bytes, ulong totalBytes){
-        qDebug() << "Progress:" << bytes << "/" << totalBytes;
-    });
-    connect(api, &SafeApi::pushFileComplete, [&](ulong id, SafeFile fileInfo) {
-        qDebug() << "New file uploaded:" << fileInfo.name;
-        finishTransfer(path);
-    });
-    connect(api, &SafeApi::errorRaised, [&](ulong id, quint16 code, QString text){
-        qWarning() << "Error:" << text << "(" << code << ")";
-        finishTransfer(path);
-    });
-
     bool active = this->activeTransfers.contains(path);
     if(active) {
         finishTransfer(path);
     }
-    this->activeTransfers.insert(path, api);
 
     connect(timer, &QTimer::timeout, [=](){
         uploadFile(dir_id, info);
@@ -358,7 +440,25 @@ void SafeDaemon::queueUploadFile(const QString &dir_id, const QFileInfo &info)
 void SafeDaemon::uploadFile(const QString &dir_id, const QFileInfo &info)
 {
     QString path(info.filePath());
-    this->activeTransfers[path]->pushFile(dir_id, path, info.fileName(), true);
+    auto api = this->apiFactory->newApi();
+
+    connect(api,
+            &SafeApi::pushFileProgress, [=](ulong id, ulong bytes, ulong totalBytes){
+        qDebug() << "Progress:" << bytes << "/" << totalBytes;
+    });
+    connect(api,
+            &SafeApi::pushFileComplete, [=](ulong id, SafeFile fileInfo) {
+        qDebug() << "New file uploaded:" << fileInfo.name;
+        finishTransfer(path);
+    });
+    connect(api,
+            &SafeApi::errorRaised, [=](ulong id, quint16 code, QString text){
+        qWarning() << "Error:" << text << "(" << code << ")";
+        finishTransfer(path);
+    });
+
+    this->activeTransfers[path] = api;
+    api->pushFile(dir_id, path, info.fileName(), true);
 }
 
 void SafeDaemon::removeFile(const QFileInfo &info)
@@ -409,9 +509,8 @@ QString SafeDaemon::makeHash(const QString &str)
     return hash;
 }
 
-QString SafeDaemon::updateDirHash(const QDir &dir)
+void SafeDaemon::updateDirHash(const QDir &dir)
 {
-    qDebug() << "PATH:::" << dir.absolutePath();
     this->localStateDb->updateDirHash(relativeFilePath(
                                           QFileInfo(dir.absolutePath())));
 }
@@ -421,10 +520,6 @@ ulong SafeDaemon::getMtime(const QFileInfo &info)
     return info.lastModified().toTime_t();
 }
 
-// Seems that I'm supposed to know some O-effective algorithms,
-// trees, rbtrees, other things,
-// but I only know loops and ifs
-// LOL
 void SafeDaemon::fullIndex(const QDir &dir)
 {
     qDebug() << "Doing full index";
@@ -470,6 +565,7 @@ void SafeDaemon::fullIndex(const QDir &dir)
             }
         } else if (QDir(info.filePath()).count() < 3) {
             // index empty dir
+            stats.dirs++;
             this->localStateDb->insertDir(relativeFilePath(info),
                                           info.dir().dirName(),
                                           getMtime(info));
@@ -507,10 +603,15 @@ void SafeDaemon::fullRemoteIndex()
             tree = QString(QDir::separator());
         }
 
+        // index root
+        if(root)
+            remoteStateDb->insertDir(tree, tree, 0, root_info.value("id").toString());
+
         foreach(SafeFile file, files) {
             if(file.is_trash) {
                 continue;
             }
+            // index file
             remoteStateDb->insertFile(tree, root ? file.name : (tree + QDir::separator() + file.name),
                                       file.name, file.mtime, file.chksum, file.id);
         }
@@ -520,6 +621,7 @@ void SafeDaemon::fullRemoteIndex()
                 continue;
             }
             ++counter;
+            // index dir
             remoteStateDb->insertDir(root ? dir.name : (tree + QDir::separator() + dir.name),
                                      dir.name, dir.mtime, dir.id);
             api->listDir(dir.id);
@@ -533,7 +635,7 @@ void SafeDaemon::fullRemoteIndex()
         }
     });
     connect(api, &SafeApi::errorRaised, [&](ulong id, quint16 code, QString text){
-        qWarning() << "Error:" << text << "(" << code << ")";
+        qWarning() << "Error remote indexing:" << text << "(" << code << ")";
         --counter;
         if(counter < 1)
             loop.exit();
@@ -541,10 +643,10 @@ void SafeDaemon::fullRemoteIndex()
     });
 
     ++counter;
-    api->listDir(getDirId("/"));
+    api->listDir(fetchDirId("/"));
     loop.exec();
 
-    qDebug() << "Finished indexing" << counter;
+    qDebug() << "Finished remote indexing";
 }
 
 void SafeDaemon::checkIndex(const QDir &dir)
@@ -558,7 +660,7 @@ QString SafeDaemon::relativeFilePath(const QFileInfo &info)
     return relative.isEmpty() ? "/" : relative;
 }
 
-QString SafeDaemon::getDirId(const QString &path)
+QString SafeDaemon::fetchDirId(const QString &path)
 {
     QString dirId;
     QEventLoop loop;

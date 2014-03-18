@@ -27,6 +27,9 @@ public:
     void updateDirHash(QString dir);
     void updateDirId(QString dir, QString dirId);
 
+    QString getDirId(QString path);
+    QString getPathById(QString id);
+
     static QString formPath(QString name);
 
 signals:
