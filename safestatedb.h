@@ -14,22 +14,23 @@ class SafeStateDb : public QObject
     Q_OBJECT
 public:
     explicit SafeStateDb(QString name, QObject *parent = 0);
-    void insertDir(QString id, QString path, QString name, QString hash, uint mtime);
-    void insertFile(QString dir, QString path, QString name, QString hash, uint mtime);
+    ~SafeStateDb();
+    void insertDir(QString path, QString name, ulong mtime, QString id = QString(),
+                   QString hash = QString());
+    void insertFile(QString dir, QString path, QString name, ulong mtime,
+                    QString hash = QString(), QString id = QString());
     void removeDir(QString path);
     void removeFile(QString path);
     bool existsFile(QString path);
     bool existsDir(QString path);
     QString findFile(QString hash);
     void updateDirHash(QString dir);
+    void updateDirId(QString dir, QString dirId);
 
-    bool open();
     static QString formPath(QString name);
 
 signals:
 
-public slots:
-    void close();
 
 private:
     QSqlDatabase database;

@@ -48,6 +48,7 @@ private:
     SafeStateDb *localStateDb;
     SafeStateDb *remoteStateDb;
 
+    QMap<QString, QTimer *> pendingTransfers;
     QMap<QString, SafeApi *> activeTransfers;
     void finishTransfer(const QString& path);
 
@@ -61,12 +62,14 @@ private:
     QString makeHash(const QFileInfo &info);
     QString makeHash(const QString &str);
     QString updateDirHash(const QDir &dir);
-    uint getMtime(const QFileInfo &info);
-    void fullIndex(const QDir &dir); // hash + mtime
-    void checkIndex(const QDir &dir); // mtime
+    ulong getMtime(const QFileInfo &info);
     QString relativePath(const QFileInfo &info);
     QString relativeFilePath(const QFileInfo &info);
     QString getDirId(const QString &path);
+
+    void fullRemoteIndex();
+    void fullIndex(const QDir &dir);
+    void checkIndex(const QDir &dir);
 
 private slots:
     void handleClientConnection();
@@ -74,21 +77,20 @@ private slots:
     // FS handlers
     void fileAdded(const QString &path, bool isDir);
     void fileModified(const QString &path);
-    void fileDeleted(const QString &path);
+    void fileDeleted(const QString &path, bool isDir);
     void fileMoved(const QString &path1, const QString &path2);
     void fileCopied(const QString &path1, const QString &path2);
 
-    // TODO: file actions queues
+    QString createDir(const QString &parent_id, const QString &path);
+    void removeDir(const QString &path);
 
-    /* WIP
-    void createDir();
-    void removeDir();
-    void uploadFile();
-    void downloadFile;
-    void removeFile();
-    void copyFile();
-    void moveFile();
-    */
+    void queueUploadFile(const QString &dir_id, const QFileInfo &info);
+    void uploadFile(const QString &dir_id, const QFileInfo &info);
+
+    void removeFile(const QFileInfo &info);
+    //void downloadFile(const QString &path);
+    //void copyFile(const QString &path1, const QString &path2);
+    //void moveFile(const QString &path1, const QString &path2);
 
     bool authUser();
     void deauthUser();

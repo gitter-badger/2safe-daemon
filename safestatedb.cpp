@@ -18,12 +18,16 @@ SafeStateDb::SafeStateDb(QString name, QObject *parent) :
 
     this->database = QSqlDatabase::addDatabase("QSQLITE", name + QString("_conn"));
     this->database.setDatabaseName(dbPath);
-    if(!open())
+
+    if (!this->database.open()) {
+        qWarning() << "Can not open database";
         return;
+    }
 
     QString q("CREATE TABLE IF NOT EXISTS files ");
     q.append("(");
     q.append("_id INTEGER PRIMARY KEY,");
+    q.append("id VARCHAR(32),");
     q.append("dir TEXT,");
     q.append("path TEXT,");
     q.append("name VARCHAR(255),");
@@ -42,11 +46,15 @@ SafeStateDb::SafeStateDb(QString name, QObject *parent) :
     q.append("mtime INTEGER");
     q.append(")");
     query(q);
-
-    close();
 }
 
-void SafeStateDb::insertDir(QString id, QString path, QString name, QString hash, uint mtime)
+SafeStateDb::~SafeStateDb()
+{
+    this->database.close();
+}
+
+void SafeStateDb::insertDir(QString path, QString name, ulong mtime,
+                            QString id, QString hash)
 {
     QSqlQuery query(this->database);
     QString q("INSERT OR REPLACE INTO dirs ");
@@ -58,23 +66,25 @@ void SafeStateDb::insertDir(QString id, QString path, QString name, QString hash
     query.bindValue(":path", path);
     query.bindValue(":name", name);
     query.bindValue(":hash", hash);
-    query.bindValue(":mtime", mtime);
+    query.bindValue(":mtime", qint64(mtime));
     query.exec();
 }
 
-void SafeStateDb::insertFile(QString dir, QString path, QString name, QString hash, uint mtime)
+void SafeStateDb::insertFile(QString dir, QString path, QString name, ulong mtime,
+                             QString hash, QString id)
 {
     QSqlQuery query(this->database);
     QString q("INSERT OR REPLACE INTO files ");
-    q.append("(dir, path, name, hash, mtime)");
+    q.append("(id, dir, path, name, hash, mtime)");
     q.append(" VALUES ");
-    q.append("(:dir, :path, :name, :hash, :mtime)");
+    q.append("(:id, :dir, :path, :name, :hash, :mtime)");
     query.prepare(q);
+    query.bindValue(":id", id);
     query.bindValue(":dir", dir);
     query.bindValue(":path", path);
     query.bindValue(":name", name);
     query.bindValue(":hash", hash);
-    query.bindValue(":mtime", mtime);
+    query.bindValue(":mtime", qint64(mtime));
     query.exec();
 }
 
@@ -120,8 +130,6 @@ bool SafeStateDb::existsDir(QString path)
 
 void SafeStateDb::updateDirHash(QString dir)
 {
-    if(!open())
-        return;
     QSqlQuery query(this->database);
     query.prepare("SELECT hash FROM files WHERE dir=:dir");
     query.bindValue(":dir", dir);
@@ -132,14 +140,20 @@ void SafeStateDb::updateDirHash(QString dir)
     }
     QString hash(QCryptographicHash::hash(
                      hashstr.toUtf8(), QCryptographicHash::Md5).toHex());
-    qDebug() << "Collected hash:" << hashstr;
-    qDebug() << "Overall hash:" << hash;
     query.clear();
     query.prepare("UPDATE dirs SET hash=:hash WHERE path=:path");
     query.bindValue(":hash", hash);
     query.bindValue(":path", dir);
     query.exec();
-    close();
+}
+
+void SafeStateDb::updateDirId(QString dir, QString dirId)
+{
+    QSqlQuery query(this->database);
+    query.prepare("UPDATE dirs SET id=:id WHERE path=:path");
+    query.bindValue(":id", dirId);
+    query.bindValue(":path", dir);
+    query.exec();
 }
 
 QString SafeStateDb::findFile(QString hash)
@@ -158,21 +172,6 @@ void SafeStateDb::query(const QString &str)
         qWarning() << "Query is not valid:" << str;
     }
 }
-
-bool SafeStateDb::open()
-{
-    if (!this->database.open()) {
-        qWarning() << "Can not open database";
-        return false;
-    }
-    return true;
-}
-
-void SafeStateDb::close()
-{
-    this->database.close();
-}
-
 
 QString SafeStateDb::formPath(QString name)
 {
