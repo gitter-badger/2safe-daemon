@@ -19,10 +19,14 @@
 
 #define DIR_CREATED_EVENT "dir_created"
 #define DIR_MOVED_EVENT "dir_moved"
-#define FILE_MOVED_EVENT "file_moved"
+#define DIR_REMOVED_EVENT "dir_removed"
 #define FILE_UPLOADED_EVENT "file_uploaded"
+#define FILE_MOVED_EVENT "file_moved"
+#define FILE_REMOVED_EVENT "file_removed"
 
 // cheating
 #define TRASH_ID "227931033757"
+#define SYSTEM_ID "227932033757"
+#define ROOT_ID "227930033757"
 
 #endif // SAFECOMMON_H

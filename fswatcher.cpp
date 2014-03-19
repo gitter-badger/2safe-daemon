@@ -23,13 +23,11 @@ FSWatcher::FSWatcher(QString path, QObject *parent) :
 
         return;
     }
-
-    qDebug() << "Watcher established";
 }
 
 void FSWatcher::watch()
 {
-    qDebug() << "Started watching";
+    qDebug() << "Started local watcher";
 
     struct inotify_event * event;
     QString moved_from;

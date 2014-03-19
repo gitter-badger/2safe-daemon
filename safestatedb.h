@@ -20,15 +20,20 @@ public:
     void insertFile(QString dir, QString path, QString name, ulong mtime,
                     QString hash = QString(), QString id = QString());
     void removeDir(QString path);
+    void removeDirRecursively(QString path);
     void removeFile(QString path);
+    void removeFileById(QString id);
     bool existsFile(QString path);
     bool existsDir(QString path);
     QString findFile(QString hash);
     void updateDirHash(QString dir);
     void updateDirId(QString dir, QString dirId);
-
+    QString getFileId(QString path);
     QString getDirId(QString path);
-    QString getPathById(QString id);
+
+    QString getDirPathById(QString id);
+    ulong getFileMtimeById(QString id);
+    QString getFileHashById(QString id);
 
     static QString formPath(QString name);
 

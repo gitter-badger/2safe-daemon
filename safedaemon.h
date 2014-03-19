@@ -24,6 +24,7 @@
 #include <QCryptographicHash>
 #include <QMap>
 #include <QEventLoop>
+#include <QMutex>
 #include <lib2safe/safeapi.h>
 
 #include "safeapifactory.h"
@@ -74,8 +75,8 @@ private:
     void fullIndex(const QDir &dir);
     void checkIndex(const QDir &dir);
 
-    SafeFile fetchFileInfo(const QString &id);
-    SafeDir fetchDirInfo(const QString &id);
+    QJsonObject fetchFileInfo(const QString &id);
+    QJsonObject fetchDirInfo(const QString &id);
 
 private slots:
     // FS handlers
@@ -86,10 +87,10 @@ private slots:
     void fileCopied(const QString &path1, const QString &path2);
 
     // Remote handlers
-    void remoteFileAdded(QString id);
-    void remoteFileDeleted(QString id);
-    void remoteDirectoryCreated(QString id);
-    void remoteDirectoryDeleted(QString id);
+    void remoteFileAdded(QString id, QString pid, QString name);
+    void remoteFileDeleted(QString id, QString pid, QString name);
+    void remoteDirectoryCreated(QString id, QString pid, QString name);
+    void remoteDirectoryDeleted(QString id, QString pid, QString name);
     // from /d1/n1 to /d2/n2
     // pid1 = id of d1, pid2 = id of d2
     void remoteFileMoved(QString id, QString pid1, QString n1, QString pid2, QString n2);
@@ -97,15 +98,16 @@ private slots:
 
     // Instant actions
     QString createDir(const QString &parent_id, const QString &path);
-    void removeDir(const QString &path);
-    void removeFile(const QFileInfo &info);
-    //void copyFile(const QString &path1, const QString &path2);
-    //void moveFile(const QString &path1, const QString &path2);
+    void remoteRemoveDir(const QFileInfo &info);
+    void remoteRemoveFile(const QFileInfo &info);
+    //void remoteCopyFile(const QString &path1, const QString &path2);
+    //void remoteMoveFile(const QString &path1, const QString &path2);
 
     // Queued
     void queueUploadFile(const QString &dir_id, const QFileInfo &info);
     void uploadFile(const QString &dir_id, const QFileInfo &info);
-    //void downloadFile(const QString &path);
+    void queueDownloadFile(const QString &id, const QFileInfo &info);
+    void downloadFile(const QString &id, const QFileInfo &info);
 
     // Misc
     void deauthUser();

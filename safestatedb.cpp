@@ -96,11 +96,27 @@ void SafeStateDb::removeDir(QString path)
     query.exec();
 }
 
+void SafeStateDb::removeDirRecursively(QString path)
+{
+    QSqlQuery query(this->database);
+    query.prepare("DELETE FROM files WHERE path like :path%");
+    query.bindValue(":path", path);
+    query.exec();
+}
+
 void SafeStateDb::removeFile(QString path)
 {
     QSqlQuery query(this->database);
     query.prepare("DELETE FROM files WHERE path=:path");
     query.bindValue(":path", path);
+    query.exec();
+}
+
+void SafeStateDb::removeFileById(QString id)
+{
+    QSqlQuery query(this->database);
+    query.prepare("DELETE FROM files WHERE id=:id");
+    query.bindValue(":id", id);
     query.exec();
 }
 
@@ -159,6 +175,18 @@ void SafeStateDb::updateDirId(QString dir, QString dirId)
     query.exec();
 }
 
+QString SafeStateDb::getFileId(QString path)
+{
+    QSqlQuery query(this->database);
+    query.prepare("SELECT id FROM files WHERE path=:path");
+    query.bindValue(":path", path);
+    if (query.exec() && query.next()) {
+        return query.value(0).toString();
+    }
+
+    return "";
+}
+
 QString SafeStateDb::getDirId(QString path)
 {
     QSqlQuery query(this->database);
@@ -171,10 +199,34 @@ QString SafeStateDb::getDirId(QString path)
     return "";
 }
 
-QString SafeStateDb::getPathById(QString id)
+QString SafeStateDb::getDirPathById(QString id)
 {
     QSqlQuery query(this->database);
     query.prepare("SELECT path FROM dirs WHERE id=:id");
+    query.bindValue(":id", id);
+    if (query.exec() && query.next()) {
+        return query.value(0).toString();
+    }
+
+    return "";
+}
+
+ulong SafeStateDb::getFileMtimeById(QString id)
+{
+    QSqlQuery query(this->database);
+    query.prepare("SELECT mtime FROM files WHERE id=:id");
+    query.bindValue(":id", id);
+    if (query.exec() && query.next()) {
+        return (ulong)query.value(0).toDouble();
+    }
+
+    return 0;
+}
+
+QString SafeStateDb::getFileHashById(QString id)
+{
+    QSqlQuery query(this->database);
+    query.prepare("SELECT hash FROM files WHERE id=:id");
     query.bindValue(":id", id);
     if (query.exec() && query.next()) {
         return query.value(0).toString();
