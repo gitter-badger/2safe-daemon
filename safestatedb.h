@@ -22,7 +22,6 @@ public:
     void removeDir(QString path);
     void removeDirRecursively(QString path);
     void removeFile(QString path);
-    void removeFileById(QString id);
     bool existsFile(QString path);
     bool existsDir(QString path);
     QString findFile(QString hash);
@@ -34,6 +33,11 @@ public:
     QString getDirPathById(QString id);
     ulong getFileMtimeById(QString id);
     QString getFileHashById(QString id);
+    void removeFileById(QString id);
+    void removeDirById(QString id);
+    void removeDirByIdRecursively(QString id);
+    bool existsFileById(QString id);
+    bool existsDirById(QString id);
 
     static QString formPath(QString name);
 

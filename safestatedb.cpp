@@ -120,6 +120,50 @@ void SafeStateDb::removeFileById(QString id)
     query.exec();
 }
 
+void SafeStateDb::removeDirById(QString id)
+{
+    QSqlQuery query(this->database);
+    query.prepare("DELETE FROM dirs WHERE id=:id");
+    query.bindValue(":id", id);
+    query.exec();
+}
+
+void SafeStateDb::removeDirByIdRecursively(QString id)
+{
+    QString path = getDirPathById(id);
+    removeDirRecursively(path);
+}
+
+bool SafeStateDb::existsFileById(QString id)
+{
+    QSqlQuery query(this->database);
+    query.prepare("SELECT count(*) FROM files WHERE id=:id");
+    query.bindValue(":id", id);
+
+    if (query.exec()) {
+        query.next();
+        if(query.value(0).toInt() > 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool SafeStateDb::existsDirById(QString id)
+{
+    QSqlQuery query(this->database);
+    query.prepare("SELECT count(*) FROM dirs WHERE id=:id");
+    query.bindValue(":id", id);
+
+    if (query.exec()) {
+        query.next();
+        if(query.value(0).toInt() > 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
 bool SafeStateDb::existsFile(QString path)
 {
     QSqlQuery query(this->database);

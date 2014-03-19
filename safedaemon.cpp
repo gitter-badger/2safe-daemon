@@ -263,11 +263,12 @@ void SafeDaemon::fileAdded(const QString &path, bool isDir) {
     QString relativeF(relativeFilePath(info));
 
     if(isDir) {
-        if(this->remoteStateDb->existsDir(relativeF)
-                && !this->localStateDb->existsDir(relativeF)) {
-            return; // download in progress, ignore
+        qDebug() << "Directory added: " << relativeF;
+
+        if(this->remoteStateDb->existsDir(relativeF)) {
+            return;
         }
-        qDebug() << "Directory created: " << info.filePath();
+
         QString dirId = createDir(fetchDirId(relative), info.filePath());
         this->localStateDb->removeDir(relativeF);
         this->localStateDb->insertDir(relativeF, info.dir().dirName(), getMtime(info), dirId);
@@ -325,20 +326,22 @@ void SafeDaemon::fileDeleted(const QString &path, bool isDir)
 
     if(isDir) {
         if(!this->localStateDb->existsDir(relativeF)) {
-            return; // not tracked, ignore
+            //qDebug() << relativeF << "not tracked, ignore";
+            return;
         }
         qDebug() << "Directory deleted: " << info.filePath();
     } else {
         if(!this->localStateDb->existsFile(relativeF)) {
-            return; // not tracked, ignore
+            //qDebug() << relativeF << "not tracked, ignore";
+            return;
         }
         qDebug() << "Local file deleted: " << info.filePath();
     }
 
     if(isDir) {
-        remoteRemoveDir(info);
         this->localStateDb->removeDir(relativeF);
         this->localStateDb->removeDirRecursively(relativeF);
+        remoteRemoveDir(info);
         return;
     }
 
@@ -378,19 +381,55 @@ void SafeDaemon::remoteFileAdded(QString id, QString pid, QString name)
 void SafeDaemon::remoteFileDeleted(QString id, QString pid, QString name)
 {
     qDebug() << "[REMOTE EVENT] file deleted:" << name;
-    this->remoteStateDb->removeFileById(id);
+    QString dir = this->remoteStateDb->getDirPathById(pid);
+    QString path = (dir == QString(QDir::separator()))
+            ? name : (dir + QString(QDir::separator()) + name);
+    this->remoteStateDb->removeFile(path);
+
+    if(this->localStateDb->existsFile(path)) {
+        this->localStateDb->removeFile(path);
+        QFile(getFilesystemPath() + QDir::separator() + path).remove();
+    }
 }
 
 void SafeDaemon::remoteDirectoryCreated(QString id, QString pid, QString name)
 {
     qDebug() << "[REMOTE EVENT] directory created:" << name;
-    // XXX: HANDLE!
+    QString dir = this->remoteStateDb->getDirPathById(pid);
+    QString path = (dir == QString(QDir::separator()))
+            ? name : (dir + QString(QDir::separator()) + name);
+    SafeFile info(fetchDirInfo(id));
+
+    this->remoteStateDb->removeDir(path);
+    this->remoteStateDb->insertDir(path, name, info.mtime, id);
+
+    if(this->localStateDb->existsDir(path)) {
+        return;
+    } else {
+        this->localStateDb->insertDir(path, name, info.mtime, id);
+    }
+
+    QDir(getFilesystemPath()).mkdir(name);
 }
 
 void SafeDaemon::remoteDirectoryDeleted(QString id, QString pid, QString name)
 {
-    qDebug() << "[REMOTE EVENT] directory deleted:" << name;
-    this->remoteStateDb->removeDirById(id); // XXX: RECURSIVE
+    qDebug() << "[REMOTE EVENT] directory deleted:" << name << id;
+    QString path(this->remoteStateDb->getDirPathById(pid));
+    qDebug() << "(path)" << path;
+    this->remoteStateDb->removeDirById(id);
+    this->remoteStateDb->removeDirByIdRecursively(id);
+
+    if (this->localStateDb->existsDir(path)){
+        qDebug() << "(exists, path)" << path;
+        this->localStateDb->removeDir(path);
+        this->localStateDb->removeDirRecursively(path);
+    }
+
+    if(path.length() > 1) {
+        qDebug() << "(removing recusively)";
+        QDir(path).removeRecursively();
+    }
 }
 
 void SafeDaemon::remoteFileMoved(QString id, QString pid1, QString n1, QString pid2, QString n2)
