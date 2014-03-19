@@ -246,6 +246,33 @@ QJsonObject SafeDaemon::fetchDirInfo(const QString &id)
     return info;
 }
 
+void SafeDaemon::prepareTree(const QFileInfo &info, const QString &root)
+{
+    qDebug() << "Preparing tree" << info.path() << "root:" << root;
+    QString relative = relativePath(info);
+    QStack<QString> stack;
+    while(relative != root && relative.length() > 1) {
+        QString path(getFilesystemPath() + QDir::separator() + relative);
+        qDebug() << "pushing relative" << relative;
+        stack.push(relative);
+        relative = relativePath(QFileInfo(path));
+        qDebug() << "next relative" << relative;
+    }
+
+    qDebug() << "relative exit";
+
+    while(!stack.empty()) {
+        QString relative = stack.pop();
+        QString path(getFilesystemPath() + QDir::separator() + relative);
+        if(!this->remoteStateDb->existsDir(relative)) {
+            QString pid = fetchDirId(relativePath(QFileInfo(path)));
+            qDebug() << "preparing dir" << path << "(" << relative << ")" << "in"
+                     << pid << "(" << relativePath(QFileInfo(path)) << ")";
+            createDir(pid, path);
+        }
+    }
+}
+
 void SafeDaemon::fileAdded(const QString &path, bool isDir) {
     QFileInfo info;
     if (!this->isFileAllowed(info)) {
@@ -269,10 +296,14 @@ void SafeDaemon::fileAdded(const QString &path, bool isDir) {
             return;
         }
 
+        if(this->localStateDb->existsDir(relativeF)) {
+            return;
+        }
+
         QString dirId = createDir(fetchDirId(relative), info.filePath());
         this->localStateDb->removeDir(relativeF);
         this->localStateDb->insertDir(relativeF, info.dir().dirName(), getMtime(info), dirId);
-        // XXX: fullIndex(QDir(path));
+        fullIndex(QDir(path));
         return;
     }
 
@@ -409,7 +440,7 @@ void SafeDaemon::remoteDirectoryCreated(QString id, QString pid, QString name)
         this->localStateDb->insertDir(path, name, info.mtime, id);
     }
 
-    QDir(getFilesystemPath()).mkdir(name);
+    QDir().mkdir(getFilesystemPath() + QDir::separator() + path);
 }
 
 void SafeDaemon::remoteDirectoryDeleted(QString id, QString pid, QString name)
@@ -669,32 +700,45 @@ void SafeDaemon::fullIndex(const QDir &dir)
         if(info.isSymLink()) {
             continue;
         }
+        QString relative(relativeFilePath(info));
         if (!info.isDir()) {
             stats.space += info.size();
             auto hash = makeHash(info);
             auto mtime = getMtime(info);
-            auto dir = info.absolutePath();
+            auto dirPath = info.absolutePath();
             //index file
             stats.files++;
+            if(!this->remoteStateDb->existsFile(relative)
+                    && !this->localStateDb->existsFile(relative)){
+                if(!remoteStateDb->existsDir(relativePath(info))) {
+                    prepareTree(info, relativeFilePath(dir.path()));
+                }
+
+                emit fileAdded(info.filePath(), false);
+            }
             this->localStateDb->insertFile(
                         relativePath(info),
-                        relativeFilePath(info),
+                        relative,
                         info.fileName(),
                         mtime, hash);
 
-            if(!dir_index.contains(dir)){
-                // index dir
-                dir_index.insert(dir, QPair<QString, ulong>(
+            if(!dir_index.contains(dirPath)){
+                // push dir
+                dir_index.insert(dirPath, QPair<QString, ulong>(
                                      hash, mtime));
                 continue;
             }
-            dir_index[dir].first.append(hash);
-            if(mtime > dir_index[dir].second) {
-                dir_index[dir].second = mtime;
+            dir_index[dirPath].first.append(hash);
+            if(mtime > dir_index[dirPath].second) {
+                dir_index[dirPath].second = mtime;
             }
         } else if (QDir(info.filePath()).count() < 3) {
             // index empty dir
             stats.dirs++;
+            if(!this->remoteStateDb->existsDir(relative)
+                    && !this->localStateDb->existsDir(relative) ){
+                emit fileAdded(info.filePath(), true);
+            }
             this->localStateDb->insertDir(relativeFilePath(info),
                                           info.dir().dirName(),
                                           getMtime(info));
@@ -706,7 +750,14 @@ void SafeDaemon::fullIndex(const QDir &dir)
         if(relative.isEmpty()) {
             continue;
         }
+
+        // index dir
         stats.dirs++;
+        if(!this->remoteStateDb->existsDir(relative)
+                && !this->localStateDb->existsDir(relative)){
+
+            emit fileAdded(getFilesystemPath() + QDir::separator() + k, true);
+        }
         localStateDb->insertDir(relative, QDir(k).dirName(),
                                 dir_index[k].second, makeHash(dir_index[k].first));
     }
@@ -757,8 +808,8 @@ void SafeDaemon::fullRemoteIndex()
         }
 
         --counter; // dir parsed
-        if(dirs.isEmpty() && counter < 1) {
-            // no more dirs for recursion
+        if(counter < 1) {
+            // no more recursion
             loop.exit();
             return;
         }

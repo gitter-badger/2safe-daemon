@@ -77,6 +77,7 @@ private:
 
     QJsonObject fetchFileInfo(const QString &id);
     QJsonObject fetchDirInfo(const QString &id);
+    void prepareTree(const QFileInfo &info, const QString &root);
 
 private slots:
     // FS handlers

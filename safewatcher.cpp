@@ -6,7 +6,7 @@ SafeWatcher::SafeWatcher(ulong timestamp, SafeApiFactory *fc, QObject *parent) :
     timestamp(timestamp)
 {
     this->ticker = new QTimer(this);
-    this->ticker->setInterval(1000);
+    this->ticker->setInterval(2000);
     //this->ticker->setSingleShot(true);
     this->ticker->setTimerType(Qt::VeryCoarseTimer);
 
