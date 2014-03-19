@@ -415,7 +415,7 @@ void SafeDaemon::remoteDirectoryCreated(QString id, QString pid, QString name)
 void SafeDaemon::remoteDirectoryDeleted(QString id, QString pid, QString name)
 {
     qDebug() << "[REMOTE EVENT] directory deleted:" << name << id;
-    QString path(this->remoteStateDb->getDirPathById(pid));
+    QString path(this->remoteStateDb->getDirPathById(id));
     qDebug() << "(path)" << path;
     this->remoteStateDb->removeDirById(id);
     this->remoteStateDb->removeDirByIdRecursively(id);
@@ -428,7 +428,10 @@ void SafeDaemon::remoteDirectoryDeleted(QString id, QString pid, QString name)
 
     if(path.length() > 1) {
         qDebug() << "(removing recusively)";
-        QDir(path).removeRecursively();
+        QDir dir(getFilesystemPath() + QDir::separator() + path);
+        if (dir.exists()) {
+            dir.removeRecursively();
+        }
     }
 }
 
@@ -526,7 +529,7 @@ void SafeDaemon::uploadFile(const QString &dir_id, const QFileInfo &info)
     connect(api, &SafeApi::pushFileProgress, [=](ulong id, ulong bytes, ulong totalBytes){
         qDebug() << "U/Progress:" << bytes << "/" << totalBytes;
     });
-    connect(api, &SafeApi::pushFileComplete, [=](ulong id, SafeFile fileInfo) {
+    connect(api, &SafeApi::pushFileComplete, [=, this](ulong id, SafeFile fileInfo) {
         qDebug() << "New file uploaded:" << fileInfo.name;
         finishTransfer(path);
     });
@@ -574,7 +577,7 @@ void SafeDaemon::downloadFile(const QString &id, const QFileInfo &info)
     connect(api, &SafeApi::pullFileProgress, [=](ulong id, ulong bytes, ulong totalBytes){
         qDebug() << "D/Progress:" << bytes << "/" << totalBytes;
     });
-    connect(api, &SafeApi::pullFileComplete, [=](ulong id) {
+    connect(api, &SafeApi::pullFileComplete, [=, this](ulong id) {
         qDebug() << "File downloaded:" << path;
         finishTransfer(path);
         QString file_id = this->remoteStateDb->getFileId(relativeFilePath(info));
@@ -593,35 +596,24 @@ void SafeDaemon::downloadFile(const QString &id, const QFileInfo &info)
 void SafeDaemon::remoteRemoveFile(const QFileInfo &info)
 {
     QString path(info.filePath());
-    QEventLoop loop;
-    qDebug() << "Request remote delete" << path;
-    qDebug() << "(relative)" << relativeFilePath(info);
     QString id(this->remoteStateDb->getFileId(relativeFilePath(info)));
-    qDebug() << "(id)" << id;
     if(id.isEmpty()) {
         qWarning() << "File" << relativeFilePath(info) << "isn't exists in the remote index";
         return;
     }
 
     auto api = this->apiFactory->newApi();
-    connect(api, &SafeApi::removeFileComplete, [&](ulong id){
+    connect(api, &SafeApi::removeFileComplete, [=, this](ulong id){
         qDebug() << "Remote file deleted" << path;
-        loop.exit();
+        finishTransfer(path);
     });
     connect(api, &SafeApi::errorRaised, [&](ulong id, quint16 code, QString text){
         qWarning() << "Error deleting:" << text << "(" << code << ")";
-        loop.exit();
+        finishTransfer(path);
     });
 
-    bool queued = this->pendingTransfers.contains(path);
-    if(queued) {
-        this->pendingTransfers[path]->stop();
-        this->pendingTransfers.take(path)->deleteLater();
-    }
-    finishTransfer(path);
-
+    this->activeTransfers.insert(path, api);
     api->removeFile(id, true);
-    loop.exec();
 }
 
 bool SafeDaemon::isFileAllowed(const QFileInfo &info) {

@@ -32,7 +32,7 @@ void SafeWatcher::eventsFetched(ulong id, QJsonArray events)
         QJsonObject ev = event.toObject();
 
         // update timestamp if newer
-        ulong ts = ((ulong)(ev.value("timestamp").toDouble() / 1000000.0)) + 1;
+        ulong ts = ((ulong)(ev.value("timestamp").toDouble() / 1000000.0));
         if(ts > this->timestamp) {
             this->timestamp = ts;
             emit timestampChanged(ts);
@@ -51,11 +51,11 @@ void SafeWatcher::eventsFetched(ulong id, QJsonArray events)
             QString new_pid = ev.value("new_parent_id").toString();
             QString old_name = ev.value("old_name").toString();
             QString new_name = ev.value("new_name").toString();
-            QString old_id = ev.value("old_id").toString();
+            QString old_id = ev.value("id").toString();
             if(new_pid == TRASH_ID) { // XXX: fix it
                 emit directoryDeleted(old_id, old_pid, old_name);
             } else {
-                emit directoryMoved(ev.value("old_id").toString(),
+                emit directoryMoved(ev.value("id").toString(),
                                     old_pid, old_name, new_pid, new_name);
             }
         }else if(type == FILE_MOVED_EVENT) {
