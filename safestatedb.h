@@ -29,6 +29,7 @@ public:
     void updateDirId(QString dir, QString dirId);
     QString getFileId(QString path);
     QString getDirId(QString path);
+    ulong getFileMtime(QString path);
 
     QString getDirPathById(QString id);
     ulong getFileMtimeById(QString id);

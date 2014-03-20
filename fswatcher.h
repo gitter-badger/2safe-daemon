@@ -18,6 +18,7 @@ class FSWatcher : public QObject
 public:
     explicit FSWatcher(QString path, QObject *parent = 0);
     void watch();
+    void addRecursiveWatch(QString path);
     ~FSWatcher();
     QString path() {return m_path;}
 

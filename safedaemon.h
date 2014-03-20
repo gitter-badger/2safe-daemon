@@ -84,7 +84,7 @@ private slots:
     void fileAdded(const QString &path, bool isDir);
     void fileModified(const QString &path);
     void fileDeleted(const QString &path, bool isDir);
-    void fileMoved(const QString &path1, const QString &path2);
+    void fileMoved(const QString &path1, const QString &path2, bool isDir);
     void fileCopied(const QString &path1, const QString &path2);
 
     // Remote handlers

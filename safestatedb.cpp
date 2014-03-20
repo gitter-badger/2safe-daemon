@@ -243,6 +243,18 @@ QString SafeStateDb::getDirId(QString path)
     return "";
 }
 
+ulong SafeStateDb::getFileMtime(QString path)
+{
+    QSqlQuery query(this->database);
+    query.prepare("SELECT mtime FROM files WHERE path=:path");
+    query.bindValue(":path", path);
+    if (query.exec() && query.next()) {
+        return (ulong)query.value(0).toDouble();
+    }
+
+    return 0;
+}
+
 QString SafeStateDb::getDirPathById(QString id)
 {
     QSqlQuery query(this->database);

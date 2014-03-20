@@ -275,15 +275,16 @@ void SafeDaemon::prepareTree(const QFileInfo &info, const QString &root)
 
 void SafeDaemon::fileAdded(const QString &path, bool isDir) {
     QFileInfo info;
-    if (!this->isFileAllowed(info)) {
-        qDebug() << "Ignoring object" << info.filePath();
-        return;
-    }
 
     if(isDir) {
         info.setFile(QDir(path).path());
     } else {
         info.setFile(path);
+    }
+
+    if (!this->isFileAllowed(info)) {
+        qDebug() << "Ignoring object" << info.filePath();
+        return;
     }
 
     QString relative(relativePath(info));
@@ -338,7 +339,10 @@ void SafeDaemon::fileModified(const QString &path) {
 
     if(this->remoteStateDb->existsFile(relativeF)){
         // XXX: check for cause (mtime/hash)
-        return;
+        if(getMtime(info) > this->remoteStateDb->getFileMtime(relativeF)) {
+        } else {
+            return;
+        }
     }
 
     qDebug() << "File modified: " << info.filePath();
@@ -381,9 +385,25 @@ void SafeDaemon::fileDeleted(const QString &path, bool isDir)
     updateDirHash(info.dir());
 }
 
-void SafeDaemon::fileMoved(const QString &path1, const QString &path2)
+void SafeDaemon::fileMoved(const QString &path1, const QString &path2, bool isDir)
 {
+    qDebug() << "File moved from" << path1 << "to" << path2;
+    QString relative1(relativeFilePath(path1));
+    QString relative2(relativeFilePath(path2));
 
+    if(this->localStateDb->existsFile(relative2)) {
+        fileModified(path2);
+    } else {
+        // XXX: proper moving without reuploading
+        fileDeleted(path2, isDir);
+        fileAdded(path2, isDir);
+    }
+
+    if(isDir) {
+       this->localStateDb->removeDir(relative1);
+    } else {
+        this->localStateDb->removeFile(relative1);
+    }
 }
 
 void SafeDaemon::fileCopied(const QString &path1, const QString &path2)
@@ -440,25 +460,24 @@ void SafeDaemon::remoteDirectoryCreated(QString id, QString pid, QString name)
         this->localStateDb->insertDir(path, name, info.mtime, id);
     }
 
-    QDir().mkdir(getFilesystemPath() + QDir::separator() + path);
+    QString dirPath(getFilesystemPath() + QDir::separator() + path);
+    QDir().mkdir(dirPath);
+    this->watcher->addRecursiveWatch(dirPath);
 }
 
 void SafeDaemon::remoteDirectoryDeleted(QString id, QString pid, QString name)
 {
-    qDebug() << "[REMOTE EVENT] directory deleted:" << name << id;
+    qDebug() << "[REMOTE EVENT] directory deleted:" << name;
     QString path(this->remoteStateDb->getDirPathById(id));
-    qDebug() << "(path)" << path;
     this->remoteStateDb->removeDirById(id);
     this->remoteStateDb->removeDirByIdRecursively(id);
 
     if (this->localStateDb->existsDir(path)){
-        qDebug() << "(exists, path)" << path;
         this->localStateDb->removeDir(path);
         this->localStateDb->removeDirRecursively(path);
     }
 
     if(path.length() > 1) {
-        qDebug() << "(removing recusively)";
         QDir dir(getFilesystemPath() + QDir::separator() + path);
         if (dir.exists()) {
             dir.removeRecursively();
@@ -468,16 +487,50 @@ void SafeDaemon::remoteDirectoryDeleted(QString id, QString pid, QString name)
 
 void SafeDaemon::remoteFileMoved(QString id, QString pid1, QString n1, QString pid2, QString n2)
 {
-    SafeDir dir1(fetchDirInfo(pid1));
-    SafeDir dir2(fetchDirInfo(pid2));
-    qDebug() << "[REMOTE EVENT] file moved:" << dir1.tree+n1 << "to" << dir2.tree+n2;
+    QString dir1 = this->remoteStateDb->getDirPathById(pid1);
+    QString dir2 = this->remoteStateDb->getDirPathById(pid2);
+    QString path1 = (dir1 == QString(QDir::separator()))
+            ? n1 : (dir1 + QString(QDir::separator()) + n1);
+    QString path2 = (dir2 == QString(QDir::separator()))
+            ? n2 : (dir2 + QString(QDir::separator()) + n2);
+
+    qDebug() << "[REMOTE EVENT] file moved:" << path1 << "to" << path2;
+
+    this->remoteStateDb->removeFileById(id);
+
+    if (this->localStateDb->existsFile(path1)){
+        this->localStateDb->removeFile(path1);
+    }
+
+    SafeFile file(fetchFileInfo(id));
+    this->localStateDb->insertFile(dir2, path2, file.name, file.mtime, file.chksum, id);
+
+    QDir().rename(getFilesystemPath() + QDir::separator() + path1,
+                  getFilesystemPath() + QDir::separator() + path2);
 }
 
 void SafeDaemon::remoteDirectoryMoved(QString id, QString pid1, QString n1, QString pid2, QString n2)
 {
-    SafeDir dir1(fetchDirInfo(pid1));
-    SafeDir dir2(fetchDirInfo(pid2));
-    qDebug() << "[REMOTE EVENT] directory moved:" << dir1.tree+n1 << "to" << dir2.tree+n2;
+    QString dir1 = this->remoteStateDb->getDirPathById(pid1);
+    QString dir2 = this->remoteStateDb->getDirPathById(pid2);
+    QString path1 = (dir1 == QString(QDir::separator()))
+            ? n1 : (dir1 + QString(QDir::separator()) + n1);
+    QString path2 = (dir2 == QString(QDir::separator()))
+            ? n2 : (dir2 + QString(QDir::separator()) + n2);
+
+    qDebug() << "[REMOTE EVENT] directory moved:" << path1 << "to" << path2;
+
+    this->remoteStateDb->removeDirById(id);
+
+    if (this->localStateDb->existsDir(path1)){
+        this->localStateDb->removeDir(path1);
+    }
+
+    SafeDir info(fetchDirInfo(id));
+    this->localStateDb->insertDir(path2, info.name, info.mtime, id);
+
+    QDir().rename(getFilesystemPath() + QDir::separator() + path1,
+                  getFilesystemPath() + QDir::separator() + path2);
 }
 
 QString SafeDaemon::createDir(const QString &parent_id, const QString &path)

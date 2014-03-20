@@ -61,7 +61,7 @@ void FSWatcher::watch()
         //qDebug() << "Fast cycle elapsed";
         QString path;
         path.append(inotifytools_filename_from_wd( event->wd )).append( event->name );
-        if(event->mask & IN_ISDIR) {
+        if( event && (event->mask & IN_ISDIR) ) {
             path.append(QDir::separator());
         }
 
@@ -69,27 +69,27 @@ void FSWatcher::watch()
         // qDebug() << event->cookie << inotifytools_event_to_str(event->mask) << path;
 
         // Obvious delete
-        if (event->mask & IN_DELETE) {
+        if ( event && (event->mask & IN_DELETE) ) {
             emit deleted(path, (event->mask & IN_ISDIR));
             return;
         }
 
         // Moved away
-        if ( !moved_from.isEmpty() && !(event->mask & IN_MOVED_TO)) {
+        if ( !moved_from.isEmpty() && event && !(event->mask & IN_MOVED_TO) ) {
             handleMovedAwayFile(moved_from);
             moved_from.clear();
             cookie = 0;
         }
 
         // Obvious modification
-        if( (event->mask & IN_CLOSE_WRITE) ) {
+        if( event && (event->mask & IN_CLOSE_WRITE) ) {
             emit modified(path);
             return;
         }
 
         // Obvious rename
         if ( !moved_from.isEmpty() && cookie == event->cookie
-             && (event->mask & IN_MOVED_TO) ){
+             && event && (event->mask & IN_MOVED_TO) ){
             QString new_name = path;
             inotifytools_replace_filename( moved_from.toStdString().c_str(),
                                            new_name.toStdString().c_str() );
@@ -98,7 +98,7 @@ void FSWatcher::watch()
             // necessary cleanup
             moved_from.clear();
             cookie = 0;
-        } else if ((event->mask & IN_CREATE) || (event->mask & IN_MOVED_TO)) {
+        } else if ( event && ((event->mask & IN_CREATE) || (event->mask & IN_MOVED_TO)) ) {
             QString new_file = path;
 
             // New file - if it is a directory, watch it
@@ -113,7 +113,7 @@ void FSWatcher::watch()
             // cleanup for safe
             moved_from.clear();
             cookie = 0;
-        } else if (event->mask & IN_MOVED_FROM) {
+        } else if ( event && (event->mask & IN_MOVED_FROM) ) {
             moved_from = path;
             cookie = event->cookie;
 
@@ -147,4 +147,12 @@ void FSWatcher::stop()
 {
     this->looper->stop();
     this->loop.exit();
+}
+
+void FSWatcher::addRecursiveWatch(QString path)
+{
+    if( !inotifytools_watch_recursively( path.toStdString().c_str(), this->events )) {
+        qWarning() << "Couldn't watch new directory" << path
+                   << ":" << strerror( inotifytools_error() );
+    }
 }
