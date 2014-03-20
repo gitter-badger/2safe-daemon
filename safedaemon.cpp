@@ -4,6 +4,7 @@ SafeDaemon::SafeDaemon(QObject *parent) : QObject(parent) {
     this->settings = new QSettings(ORG_NAME, APP_NAME, this);
     this->apiFactory = new SafeApiFactory(API_HOST, this);
     this->server = new QLocalServer(this);
+    this->online = false;
 
     connect(server, &QLocalServer::newConnection, this, &SafeDaemon::handleClientConnection);
     this->bindServer(this->server,
@@ -11,45 +12,13 @@ SafeDaemon::SafeDaemon(QObject *parent) : QObject(parent) {
                      QDir::separator() + SAFE_DIR +
                      QDir::separator() + SOCKET_FILE);
 
-    if (this->authUser()) {
-        // debug clean dbs
-        purgeDb(LOCAL_STATE_DATABASE);
-        purgeDb(REMOTE_STATE_DATABASE);
-        // open dbs
-        this->localStateDb = new SafeStateDb(LOCAL_STATE_DATABASE);
-        this->remoteStateDb = new SafeStateDb(REMOTE_STATE_DATABASE);
-        // index all remote files
-        fullRemoteIndex();
-        // setup watcher (to track remote events from now)
-        this->settings->setValue("last_updated", (quint32)QDateTime::currentDateTime().toTime_t());
-        this->swatcher = new SafeWatcher((ulong)this->settings->value("last_updated").toDouble(),
-                                         this->apiFactory, this);
-        connect(this->swatcher, &SafeWatcher::timestampChanged, [&](ulong ts){
-            this->settings->setValue("last_updated", (quint32)ts);
-        });
-        connect(this->swatcher, &SafeWatcher::fileAdded, this, &SafeDaemon::remoteFileAdded);
-        connect(this->swatcher, &SafeWatcher::fileDeleted, this, &SafeDaemon::remoteFileDeleted);
-        connect(this->swatcher, &SafeWatcher::fileMoved, this, &SafeDaemon::remoteFileMoved);
-        connect(this->swatcher, &SafeWatcher::directoryCreated, this, &SafeDaemon::remoteDirectoryCreated);
-        connect(this->swatcher, &SafeWatcher::directoryDeleted, this, &SafeDaemon::remoteDirectoryDeleted);
-        connect(this->swatcher, &SafeWatcher::directoryMoved, this, &SafeDaemon::remoteDirectoryMoved);
-
-        // local index
-        if(this->settings->value("init", true).toBool()) {
-            fullIndex(QDir(getFilesystemPath()));
-            //this->settings->setValue("init", false);
-        } else {
-            checkIndex(QDir(getFilesystemPath()));
-        }
-        // start watching for remote events
-        this->swatcher->watch();
-        // start watching for fs events
-        this->initWatcher(getFilesystemPath());
-    }
+    if (this->authUser())
+        init();
 }
 
 SafeDaemon::~SafeDaemon()
 {
+    this->online = false;
     this->apiFactory->deleteLater();
     this->watcher->deleteLater();
     this->swatcher->deleteLater();
@@ -62,9 +31,11 @@ bool SafeDaemon::authUser() {
     QString password = this->settings->value("password", "").toString();
 
     if (login.length() < 1 || password.length() < 1) {
+        this->online = false;
         qDebug() << "Unauthorized";
         return false;
     } else if(!this->apiFactory->authUser(login, password)) {
+        this->online = false;
         qWarning() << "Authentication failed";
         return false;
     }
@@ -72,14 +43,56 @@ bool SafeDaemon::authUser() {
     return true;
 }
 
+void SafeDaemon::init()
+{
+    this->online = true;
+    fetchUsage();
+
+    // debug clean dbs
+    purgeDb(LOCAL_STATE_DATABASE);
+    purgeDb(REMOTE_STATE_DATABASE);
+    // open dbs
+    this->localStateDb = new SafeStateDb(LOCAL_STATE_DATABASE);
+    this->remoteStateDb = new SafeStateDb(REMOTE_STATE_DATABASE);
+    // index all remote files
+    fullRemoteIndex();
+    // setup watcher (to track remote events from now)
+    this->settings->setValue("last_updated", (quint32)QDateTime::currentDateTime().toTime_t());
+    this->swatcher = new SafeWatcher((ulong)this->settings->value("last_updated").toDouble(),
+                                     this->apiFactory, this);
+    connect(this->swatcher, &SafeWatcher::timestampChanged, [&](ulong ts){
+        this->settings->setValue("last_updated", (quint32)ts);
+    });
+    connect(this->swatcher, &SafeWatcher::fileAdded, this, &SafeDaemon::remoteFileAdded);
+    connect(this->swatcher, &SafeWatcher::fileDeleted, this, &SafeDaemon::remoteFileDeleted);
+    connect(this->swatcher, &SafeWatcher::fileMoved, this, &SafeDaemon::remoteFileMoved);
+    connect(this->swatcher, &SafeWatcher::directoryCreated, this, &SafeDaemon::remoteDirectoryCreated);
+    connect(this->swatcher, &SafeWatcher::directoryDeleted, this, &SafeDaemon::remoteDirectoryDeleted);
+    connect(this->swatcher, &SafeWatcher::directoryMoved, this, &SafeDaemon::remoteDirectoryMoved);
+
+    // local index
+    if(this->settings->value("init", true).toBool()) {
+        fullIndex(QDir(getFilesystemPath()));
+        //this->settings->setValue("init", false);
+    } else {
+        checkIndex(QDir(getFilesystemPath()));
+    }
+    // start watching for remote events
+    this->swatcher->watch();
+    // start watching for fs events
+    this->initWatcher(getFilesystemPath());
+}
+
 void SafeDaemon::deauthUser()
 {
+    this->online = false;
+    this->watcher->stop();
+
     this->apiFactory->deleteLater();
+    this->swatcher->deleteLater();
     this->watcher->deleteLater();
     this->localStateDb->deleteLater();
     this->remoteStateDb->deleteLater();
-    this->settings->setValue("login", "");
-    this->settings->setValue("password", "");
     this->settings->setValue("init", true);
 
     this->apiFactory = new SafeApiFactory(API_HOST, this);
@@ -112,8 +125,15 @@ QString SafeDaemon::socketPath() {
 
 void SafeDaemon::finishTransfer(const QString &path)
 {
-    if(activeTransfers.contains(path))
-        activeTransfers.take(path)->deleteLater();
+    if(this->activeTransfers.contains(path)) {
+        this->activeTransfers.take(path)->deleteLater();
+        fetchUsage();
+    }
+}
+
+void SafeDaemon::storeTransfer(const QString &path, SafeApi *api)
+{
+    this->activeTransfers.insert(path, api);
 }
 
 QString SafeDaemon::getFilesystemPath()
@@ -155,20 +175,19 @@ void SafeDaemon::bindServer(QLocalServer *server, QString path)
 void SafeDaemon::handleClientConnection()
 {
     auto socket = this->server->nextPendingConnection();
-    while (socket->bytesAvailable() < 1) {
-        socket->waitForReadyRead();
+    if(!socket->waitForReadyRead(2000)) {
+        qWarning() << "No data from socket connection";
     }
 
     QObject::connect(socket, &QLocalSocket::disconnected, &QLocalSocket::deleteLater);
     if (!socket->isValid() || socket->bytesAvailable() < 1) {
+        socket->disconnectFromServer();
         return;
     }
 
-    qDebug() << "Handling incoming connection";
     QTextStream stream(socket);
     stream.autoDetectUnicode();
     QString data(stream.readAll());
-    qDebug() << "Data read:" << data;
 
     /* JSON parsing */
     QJsonParseError jsonError;
@@ -194,16 +213,126 @@ void SafeDaemon::handleClientConnection()
         for (QJsonObject::ConstIterator i = args.begin(); i != args.end(); ++i) {
             this->settings->setValue(i.key(), i.value().toString());
         }
-    } else if (type == API_CALL) {
+    } else if(type == ACTION_TYPE) {
+        QString verb = message["verb"].toString();
+        if(verb == "get_public_link") {
+            QString file = message["args"].toObject().value("file").toString();
+            QString link = getPublicLink(QFileInfo(file));
+            qDebug() << "Got file:" << file << "link for it:" << link;
+            stream << link;
+            stream.flush();
+        } else if (verb == "open_in_browser") {
+            QString file = message["args"].toObject().value("file").toString();
+            QString link = getFolderLink(QFileInfo(file));
+            qDebug() << "Got file:" << file << "link for it:" << link;
+            stream << link;
+            stream.flush();
+        } else if (verb == "logout") {
+            deauthUser();
+            this->settings->setValue("login", "");
+            this->settings->setValue("password", "");
+        } else if (verb == "login") {
+            QJsonObject args = message["args"].toObject();
+            QString login = args["login"].toString();
+            QString password = args["password"].toString();
+            if (login.length() < 1 || password.length() < 1) {
+                return;
+            }
+            this->settings->setValue("login", login);
+            this->settings->setValue("password", password);
+            if(this->authUser())
+                init();
+        } else if (verb == "chdir") {
+            QString dir = message["args"].toObject().value("dir").toString();
+            QFileInfo d(dir);
+            if(d.exists() && d.isReadable() && d.isDir()) {
+                this->settings->setValue("root_name", dir);
+                deauthUser();
+                init();
+            }
+        }
+    } else if (type == API_CALL_TYPE) {
         // XXX
-    } else if (type == NOOP) {
-        stream << "noop";
+    } else if (type == NOOP_TYPE) {
+        // State variables
+        notifyEventQuota(this->used_bytes, this->total_bytes);
+        notifyEventSync(this->activeTransfers.count());
+        notifyEventAuth(this->online, this->apiFactory->login());
+
+        if(this->messagesQueue.isEmpty()) {
+            QJsonObject obj;
+            obj.insert("type", QString("noop"));
+            stream << QJsonDocument(obj).toJson();
+        } else {
+            QJsonObject obj;
+            QJsonArray messages;
+            foreach(QJsonObject m, this->messagesQueue){
+                messages.append(m);
+            }
+            obj.insert("type", QString("queue"));
+            obj.insert("messages", messages);
+            stream << QJsonDocument(obj).toJson();
+            this->messagesQueue.clear();
+        }
         stream.flush();
+
     } else {
         qWarning() << "Got message of unknown type:" << type;
     }
 
     socket->close();
+}
+
+void SafeDaemon::fetchUsage()
+{
+    auto api = this->apiFactory->newApi();
+    connect(api, &SafeApi::getDiskQuotaComplete, [&](ulong id, ulong used_bytes, ulong total_bytes){
+        this->used_bytes = used_bytes;
+        this->total_bytes = total_bytes;
+    });
+    connect(api, &SafeApi::errorRaised, [](ulong id, quint16 code, QString text){
+        qWarning() << "Error fetching quota:" << text << "(" << code << ")";
+    });
+    api->getDiskQuota();
+}
+
+void SafeDaemon::notifyEventQuota(ulong used, ulong total)
+{
+    QJsonObject obj;
+    QJsonObject values;
+    values.insert("used_bytes", (qint64)used);
+    values.insert("total_bytes", (qint64)total);
+
+    obj.insert("type", QString("event"));
+    obj.insert("category", QString("disk_quota"));
+    obj.insert("values", values);
+    this->messagesQueue.append(obj);
+}
+
+void SafeDaemon::notifyEventAuth(bool auth, QString login)
+{
+    QJsonObject obj;
+    QJsonObject values;
+    values.insert("authorized", auth);
+    values.insert("login", login);
+
+    obj.insert("type", QString("event"));
+    obj.insert("category", QString("auth"));
+    obj.insert("values", values);
+    this->messagesQueue.append(obj);
+}
+
+void SafeDaemon::notifyEventSync(ulong count)
+{
+    QJsonObject obj;
+    QJsonObject values;
+    values.insert("count", (qint64)count);
+    values.insert("timestamp", this->settings->value("last_updated").toDouble());
+
+    obj.insert("type", QString("event"));
+    obj.insert("category", QString("sync"));
+    obj.insert("values", values);
+    this->messagesQueue.append(obj);
 }
 
 QJsonObject SafeDaemon::fetchFileInfo(const QString &id)
@@ -228,7 +357,6 @@ QJsonObject SafeDaemon::fetchFileInfo(const QString &id)
 QJsonObject SafeDaemon::fetchDirInfo(const QString &id)
 {
     QJsonObject info;
-    /* ABANDONED
     QEventLoop loop;
     auto api = this->apiFactory->newApi();
     connect(api, &SafeApi::getPropsComplete, [&](ulong id, QJsonObject props){
@@ -242,7 +370,6 @@ QJsonObject SafeDaemon::fetchDirInfo(const QString &id)
 
     api->getProps(id);
     loop.exec();
-    */
     return info;
 }
 
@@ -271,6 +398,46 @@ void SafeDaemon::prepareTree(const QFileInfo &info, const QString &root)
             createDir(pid, path);
         }
     }
+}
+
+QString SafeDaemon::getPublicLink(const QFileInfo &info)
+{
+    QString objLink;
+    QString id;
+    if(info.isDir()) {
+        id = this->remoteStateDb->getDirId(relativeFilePath(info));
+    } else {
+        id = this->remoteStateDb->getFileId(relativeFilePath(info));
+    }
+    if(id.isEmpty()){
+        return QString();
+    }
+
+    QEventLoop loop;
+    auto api = this->apiFactory->newApi();
+    connect(api, &SafeApi::publicObjectComplete, [&](ulong id, QString link){
+        objLink = link;
+        loop.exit();
+    });
+    connect(api, &SafeApi::errorRaised, [&](ulong id, quint16 code, QString text){
+        qWarning() << "Error getting public link:" << text << "(" << code << ")";
+        loop.exit();
+    });
+
+    api->publicObject(id);
+    loop.exec();
+    return objLink;
+}
+
+QString SafeDaemon::getFolderLink(const QFileInfo &info)
+{
+    QString pid(fetchDirId(relativePath(info)));
+    if(pid.isEmpty()){
+        return QString();
+    }
+
+    QString prefix("https://www.2safe.com/web/");
+    return prefix + pid + QDir::separator() + info.fileName();
 }
 
 void SafeDaemon::fileAdded(const QString &path, bool isDir) {
@@ -400,7 +567,7 @@ void SafeDaemon::fileMoved(const QString &path1, const QString &path2, bool isDi
     }
 
     if(isDir) {
-       this->localStateDb->removeDir(relative1);
+        this->localStateDb->removeDir(relative1);
     } else {
         this->localStateDb->removeFile(relative1);
     }
@@ -680,6 +847,7 @@ void SafeDaemon::downloadFile(const QString &id, const QFileInfo &info)
 void SafeDaemon::remoteRemoveFile(const QFileInfo &info)
 {
     QString path(info.filePath());
+    finishTransfer(path);
     QString id(this->remoteStateDb->getFileId(relativeFilePath(info)));
     if(id.isEmpty()) {
         qWarning() << "File" << relativeFilePath(info) << "isn't exists in the remote index";
@@ -814,7 +982,7 @@ void SafeDaemon::fullIndex(const QDir &dir)
         localStateDb->insertDir(relative, QDir(k).dirName(),
                                 dir_index[k].second, makeHash(dir_index[k].first));
     }
-    qDebug() << "GBs:" << stats.space / (1024.0 * 1024.0 * 1024.0)
+    qDebug() << "MBs:" << stats.space / (1024.0 * 1024.0)
              << "\nFiles:" << stats.files <<
                 "\nDirs:" << stats.dirs;
 }

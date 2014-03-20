@@ -82,11 +82,17 @@ void SafeWatcher::eventsFetched(ulong id, QJsonArray events)
             QString id = ev.value("id").toString();
             QString parent_id = ev.value("parent_id").toString();
             QString name = ev.value("name").toString();
+            if(parent_id == TRASH_ID) {
+                return;
+            }
             emit directoryDeleted(id, parent_id, name);
         } else if(type == FILE_REMOVED_EVENT) {
             QString id = ev.value("id").toString();
             QString parent_id = ev.value("parent_id").toString();
             QString name = ev.value("name").toString();
+            if(parent_id == TRASH_ID) {
+                return;
+            }
             emit fileDeleted(id, parent_id, name);
         } else {
             //qDebug() << ev;

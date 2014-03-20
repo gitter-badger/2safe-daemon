@@ -15,7 +15,7 @@ SafeApi *SafeApiFactory::newApi()
         return api;
     }
 
-    if(this->authUser(this->login, this->password)) {
+    if(this->authUser(this->m_login, this->password)) {
         return api;
     }
 
@@ -31,7 +31,7 @@ bool SafeApiFactory::authUser(QString login, QString password)
     connect(api, &SafeApi::authUserComplete, [&](ulong id, QString user_id){
         qDebug() << "Authentication complete (user id:" << user_id << ")";
         this->sharedState = api->state();
-        this->login = login;
+        this->m_login = login;
         this->password = password;
         success = true;
         loop.exit();

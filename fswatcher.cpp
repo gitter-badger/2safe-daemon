@@ -53,77 +53,76 @@ void FSWatcher::watch()
             else {
                 qWarning() << "Watching stopped by error:" <<  strerror( inotifytools_error() );
                 stop();
+                return;
             }
         }
 
+        u_int32_t event_cookie = event->cookie;
+        u_int32_t event_mask = event->mask;
+        char *event_name = event->name;
+        int event_wd = event->wd;
+
         this->looper->setTimerType(Qt::PreciseTimer);
-        this->looper->setInterval(10);
+        this->looper->setInterval(100);
         //qDebug() << "Fast cycle elapsed";
         QString path;
-        path.append(inotifytools_filename_from_wd( event->wd )).append( event->name );
-        if( event && (event->mask & IN_ISDIR) ) {
+        path.append(inotifytools_filename_from_wd( event_wd )).append( event_name );
+        if( (event_mask & IN_ISDIR) ) {
             path.append(QDir::separator());
         }
 
         // Event debug
-        // qDebug() << event->cookie << inotifytools_event_to_str(event->mask) << path;
+        // qDebug() << event_cookie << inotifytools_event_to_str(event_mask) << path;
 
-        // Obvious delete
-        if ( event && (event->mask & IN_DELETE) ) {
-            emit deleted(path, (event->mask & IN_ISDIR));
-            return;
-        }
 
         // Moved away
-        if ( !moved_from.isEmpty() && event && !(event->mask & IN_MOVED_TO) ) {
+        if ( !moved_from.isEmpty() && !(event_mask & IN_MOVED_TO) ) {
             handleMovedAwayFile(moved_from);
             moved_from.clear();
             cookie = 0;
         }
 
+        // Obvious delete
+        if ( (event_mask & IN_DELETE) ) {
+            emit deleted(path, (event_mask & IN_ISDIR));
+            return;
+        }
+
         // Obvious modification
-        if( event && (event->mask & IN_CLOSE_WRITE) ) {
+        if( (event_mask & IN_CLOSE_WRITE) ) {
             emit modified(path);
             return;
         }
 
         // Obvious rename
-        if ( !moved_from.isEmpty() && cookie == event->cookie
-             && event && (event->mask & IN_MOVED_TO) ){
+        if ( !moved_from.isEmpty() && cookie == event_cookie
+             && (event_mask & IN_MOVED_TO) ){
             QString new_name = path;
             inotifytools_replace_filename( moved_from.toStdString().c_str(),
                                            new_name.toStdString().c_str() );
-            emit moved(moved_from, new_name, (event->mask & IN_ISDIR));
+            emit moved(moved_from, new_name, (event_mask & IN_ISDIR));
 
             // necessary cleanup
             moved_from.clear();
             cookie = 0;
-        } else if ( event && ((event->mask & IN_CREATE) || (event->mask & IN_MOVED_TO)) ) {
+        } else if ( ((event_mask & IN_CREATE) || (event_mask & IN_MOVED_TO)) ) {
             QString new_file = path;
 
             // New file - if it is a directory, watch it
-            if (event->mask & IN_ISDIR) {
+            if (event_mask & IN_ISDIR) {
                 if( !inotifytools_watch_recursively( new_file.toStdString().c_str(), this->events )) {
                     qWarning() << "Couldn't watch new directory" << new_file
                                << ":" << strerror( inotifytools_error() );
                 }
             }
-            emit added(new_file, (event->mask & IN_ISDIR));
+            emit added(new_file, (event_mask & IN_ISDIR));
 
             // cleanup for safe
             moved_from.clear();
             cookie = 0;
-        } else if ( event && (event->mask & IN_MOVED_FROM) ) {
+        } else if ( (event_mask & IN_MOVED_FROM) ) {
             moved_from = path;
-            cookie = event->cookie;
-
-            if(event->mask & IN_ISDIR) {
-                // if not watched...
-                if ( inotifytools_wd_from_filename(moved_from.toStdString().c_str()) == -1 ) {
-                    moved_from.clear();
-                    cookie = 0;
-                }
-            }
+            cookie = event_cookie;
         }
     });
     this->looper->start();
@@ -137,10 +136,11 @@ FSWatcher::~FSWatcher()
 
 void FSWatcher::handleMovedAwayFile(QString path)
 {
-    inotifytools_remove_watch_by_filename(path.toStdString().c_str());
-    // qWarning() << "Error removing watch on" << path
-    //            << ":" << strerror(inotifytools_error());
     emit deleted(path, path.endsWith(QDir::separator()));
+    inotifytools_remove_watch_by_filename(path.toStdString().c_str());
+    //qWarning() << "Error removing watch on" << path
+    //           << ":" << strerror(inotifytools_error());
+
 }
 
 void FSWatcher::stop()

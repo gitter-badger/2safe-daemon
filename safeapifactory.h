@@ -13,12 +13,13 @@ public:
     SafeApi* newApi();
     bool authUser(QString login, QString password);
     void setState(SafeApiState state){ this->sharedState = state; }
-    void setLogin(QString login) { this->login = login; }
+    void setLogin(QString login) { this->m_login = login; }
     void setPassword(QString password) { this->password = password; }
+    QString login(){ return this->m_login; }
 
 private:
     QString host;
-    QString login;
+    QString m_login;
     QString password;
     SafeApiState sharedState;
 

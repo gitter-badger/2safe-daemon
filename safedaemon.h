@@ -43,6 +43,11 @@ public:
     QString socketPath();
 
 private:
+    // XXX: do a struct
+    bool online;
+    ulong used_bytes;
+    ulong total_bytes;
+
     SafeApiFactory *apiFactory;
     QLocalServer *server;
     QSettings *settings;
@@ -53,9 +58,12 @@ private:
 
     QMap<QString, QTimer *> pendingTransfers;
     QMap<QString, SafeApi *> activeTransfers;
+    QList<QJsonObject> messagesQueue;
     void finishTransfer(const QString& path);
+    void storeTransfer(const QString& path, SafeApi *api);
 
     bool authUser();
+    void init();
     void bindServer(QLocalServer *server, QString path);
     void initWatcher(const QString &path);
 
@@ -78,6 +86,10 @@ private:
     QJsonObject fetchFileInfo(const QString &id);
     QJsonObject fetchDirInfo(const QString &id);
     void prepareTree(const QFileInfo &info, const QString &root);
+
+    // Helpers
+    QString getPublicLink(const QFileInfo &info);
+    QString getFolderLink(const QFileInfo &info);
 
 private slots:
     // FS handlers
@@ -114,6 +126,13 @@ private slots:
     void deauthUser();
     void purgeDb(const QString &name);
     void handleClientConnection();
+    void fetchUsage();
+
+    // Notifications for client
+    void notifyEventQuota(ulong used, ulong total);
+    void notifyEventAuth(bool auth, QString login = QString());
+    void notifyEventSync(ulong count);
+
 };
 
 #endif // SAFEDAEMON_H
